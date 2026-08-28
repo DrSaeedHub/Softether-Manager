@@ -1,0 +1,7 @@
+# Everything the Linux host executes or serves must stay LF, even when the
+# repository is checked out on Windows -- a CRLF shebang is a broken script.
+* text=auto eol=lf
+*.woff2 binary
+*.png binary
+*.jpg binary
+*.gz binary

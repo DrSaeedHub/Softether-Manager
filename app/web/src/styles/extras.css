@@ -1,0 +1,902 @@
+/* SOFT DECK — SoftEther Manager screen components. */
+
+/* ── the dashboard deck ───────────────────────────────────────────────────── */
+/* Main column + a narrow auxiliary column, the reference dashboard shape. */
+.dash {
+  display: grid;
+  gap: var(--s4);
+  align-items: start;
+}
+@media (min-width: 1100px) {
+  .dash {
+    grid-template-columns: minmax(0, 1fr) 340px;
+  }
+}
+.dash__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+  min-width: 0;
+}
+.dash__side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+  min-width: 0;
+}
+
+/* KPI cards — one figure each */
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--s4);
+}
+@media (min-width: 720px) {
+  .kpis {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+.kpi {
+  padding: var(--s5);
+  border-radius: var(--r-card);
+  background: var(--card-grad);
+  box-shadow: var(--nm-raise-sm);
+  min-width: 0;
+}
+.kpi__l {
+  font-size: var(--t-micro);
+  font-weight: 700;
+  color: var(--text-muted);
+}
+.kpi__v {
+  margin-top: 6px;
+  font-size: var(--t-kpi);
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  line-height: 1.05;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kpi__s {
+  margin-top: 6px;
+  font-size: var(--t-micro);
+  color: var(--text-faint);
+}
+
+/* the hero — the one light card on the deck */
+.hero {
+  padding: var(--s5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+.hero__k {
+  font-size: var(--t-micro);
+  font-weight: 700;
+  color: var(--inverse-muted);
+}
+.hero__name {
+  font-size: var(--t-section);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+.hero__v {
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+}
+.hero__s {
+  font-size: var(--t-micro);
+  color: var(--inverse-muted);
+}
+.hero__actions {
+  display: flex;
+  gap: var(--s2);
+  flex-wrap: wrap;
+  margin-top: var(--s3);
+}
+/* Buttons on the inverse card take their finish from the card, not the deck.
+ * The card flips with the theme -- pale in the dark theme, dark in the light
+ * one -- so both fills are expressed in the --inverse-* tokens, which flip
+ * with it. A blanket `.hero .btn` background override would repaint the
+ * ghost too and leave its text on its own colour, which is how it went
+ * invisible once already. */
+.hero .btn {
+  background: var(--inverse-btn);
+  color: var(--inverse-btn-ink);
+  box-shadow: 0 6px 16px rgb(0 0 0 / 0.18);
+}
+.hero .btn--ghost {
+  background: var(--inverse-btn-ghost);
+  color: var(--inverse-text);
+  box-shadow: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  .hero .btn:hover {
+    color: var(--inverse-btn-ink);
+    filter: brightness(1.04);
+  }
+  .hero .btn--ghost:hover {
+    color: var(--inverse-text);
+    background: var(--inverse-btn-ghost-hi);
+    filter: none;
+  }
+}
+
+/* a titled panel card — hubs, protocols, feeds */
+.panelcard {
+  padding: var(--s5);
+}
+.panelcard__h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  margin-bottom: var(--s3);
+}
+.panelcard__t {
+  font-size: var(--t-section);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.panelcard__s {
+  margin-top: 2px;
+  font-size: var(--t-micro);
+  color: var(--text-muted);
+}
+
+/* the feed — stacked rows inside a panel card */
+.feed {
+  display: flex;
+  flex-direction: column;
+}
+.feed__i {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  width: 100%;
+  padding: var(--s3) var(--s2);
+  border-radius: var(--r-ctl);
+  text-align: start;
+  color: var(--text);
+  transition:
+    background-color var(--d-fast) ease,
+    box-shadow var(--d-fast) ease;
+}
+.feed__i + .feed__i::before {
+  content: "";
+  position: absolute;
+  inset-inline: var(--s2);
+  top: 0;
+  height: 1px;
+  background: var(--glass-line);
+}
+@media (hover: hover) and (pointer: fine) {
+  button.feed__i:hover,
+  a.feed__i:hover {
+    background: var(--glass-lo);
+    box-shadow: var(--nm-inset-sm);
+  }
+  button.feed__i:hover::before,
+  a.feed__i:hover::before {
+    opacity: 0;
+  }
+}
+/* a soft coin holding an initial or an icon */
+.feed__ava {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--glass-lo);
+  box-shadow: var(--nm-inset-sm);
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.feed__ava--on {
+  color: var(--accent);
+}
+.feed__m {
+  flex: 1;
+  min-width: 0;
+}
+.feed__t {
+  display: block;
+  font-size: var(--t-name);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.feed__s {
+  display: block;
+  margin-top: 1px;
+  font-size: var(--t-micro);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.feed__side {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+/* ── resource monitoring ──────────────────────────────────────────────────── */
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: var(--s4);
+  margin-bottom: var(--s5);
+}
+.metric {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s5);
+  min-width: 0;
+}
+.metric__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+  min-width: 0;
+}
+.metric__label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  min-width: 0;
+}
+.metric__icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  color: var(--accent);
+  background: var(--accent-soft);
+  flex: none;
+}
+.metric__t {
+  font-size: var(--t-small);
+  font-weight: 700;
+  color: var(--text-2);
+}
+.metric__n {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.metric__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+  gap: var(--s1) var(--s3);
+}
+.metric__fold {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  font-size: var(--t-micro);
+  font-weight: 600;
+  color: var(--text-faint);
+  padding: 2px 0;
+}
+@media (hover: hover) and (pointer: fine) {
+  .metric__fold:hover {
+    color: var(--text);
+  }
+}
+.metric__more {
+  display: grid;
+  gap: var(--s1);
+}
+.metric__core {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+/* meters are grooves pressed into the card; the fill is lit */
+.meter {
+  height: 8px;
+  border-radius: 99px;
+  background: var(--glass-lo);
+  box-shadow: var(--nm-inset-sm);
+  overflow: hidden;
+  flex: 1;
+  min-width: 40px;
+}
+/* In the column-flex card the meter is a fixed bar, never a flexing one. */
+.metric > .meter {
+  flex: none;
+}
+.meter__fill {
+  height: 100%;
+  border-radius: 99px;
+  transition: width 600ms var(--ease-out-quart);
+}
+.spark {
+  width: 100%;
+  height: 34px;
+  display: block;
+}
+.metric__foot {
+  margin-top: auto;
+  padding-top: var(--s2);
+}
+
+/* ── wizard step strip ────────────────────────────────────────────────────── */
+.wizsteps {
+  display: flex;
+  gap: var(--s2);
+  margin-bottom: var(--s4);
+}
+.wizsteps__i {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 8px 16px;
+  border-radius: var(--r-pill);
+  font-size: var(--t-small);
+  font-weight: 700;
+  color: var(--text-muted);
+  background: var(--glass-lo);
+  box-shadow: var(--nm-inset-sm);
+}
+.wizsteps__i.on {
+  color: var(--text);
+  background: var(--card-grad);
+  box-shadow: var(--nm-raise-sm);
+}
+.wizsteps__i.done {
+  color: var(--ok);
+}
+.wizsteps__n {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  background: var(--glass-hi);
+}
+.wizsteps__i.on .wizsteps__n {
+  background: linear-gradient(150deg, var(--action-bg-hi), var(--action-bg));
+  color: var(--action-fg);
+}
+
+/* ── stat rows with more than three cells ─────────────────────────────────── */
+@media (min-width: 720px) {
+  .fleet {
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }
+}
+
+/* ── protocol lamps ───────────────────────────────────────────────────────── */
+.lamps {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: var(--s3);
+  margin-bottom: var(--s2);
+}
+.lamp {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s4);
+}
+.lamp__dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--idle);
+  box-shadow: 0 0 0 4px var(--idle-soft);
+}
+.lamp--on .lamp__dot,
+.lamp__dot[data-on] {
+  background: var(--ok);
+  box-shadow:
+    0 0 0 4px var(--ok-soft),
+    0 0 10px var(--ok);
+}
+.lamp__t {
+  font-size: var(--t-small);
+  font-weight: 700;
+}
+
+/* ── tool links on the server page ────────────────────────────────────────── */
+.tools {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: var(--s4);
+}
+.tool {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s1);
+  padding: var(--s5);
+  color: var(--text);
+  transition:
+    box-shadow var(--d-fast) ease,
+    transform var(--d-fast) var(--ease-out-quart);
+}
+.tool > svg {
+  color: var(--accent);
+  margin-bottom: var(--s1);
+}
+@media (hover: hover) and (pointer: fine) {
+  .tool:hover {
+    box-shadow: var(--nm-raise);
+    transform: translateY(-1px);
+  }
+}
+.tool__t {
+  font-size: var(--t-body);
+  font-weight: 700;
+}
+
+/* ── hub tiles ────────────────────────────────────────────────────────────── */
+.hubgrid {
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+}
+.hubtile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  padding: var(--s5);
+  text-align: start;
+  color: var(--text);
+  transition:
+    box-shadow var(--d-fast) ease,
+    transform var(--d-fast) var(--ease-out-quart);
+}
+@media (hover: hover) and (pointer: fine) {
+  .hubtile:hover {
+    box-shadow: var(--nm-raise);
+    transform: translateY(-1px);
+  }
+}
+.hubtile__head {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-width: 0;
+}
+.hubtile__icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  color: var(--accent);
+  background: var(--accent-soft);
+  flex: none;
+}
+.hubtile__name {
+  font-size: var(--t-body);
+  font-weight: 700;
+  flex: 1;
+  min-width: 0;
+}
+.hubtile__stats {
+  display: flex;
+  gap: var(--s5);
+  flex-wrap: wrap;
+}
+.hubtile__go {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  color: var(--text-faint);
+}
+
+/* ── hub tab strip — scrollable on mobile ─────────────────────────────────── */
+.tabs {
+  display: flex;
+  gap: var(--s2);
+  margin-bottom: var(--s5);
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 4px;
+}
+.tabs::-webkit-scrollbar {
+  display: none;
+}
+.tabs__i {
+  flex: none;
+  padding: 9px 16px;
+  border-radius: var(--r-pill);
+  font-size: var(--t-small);
+  font-weight: 700;
+  color: var(--text-muted);
+  white-space: nowrap;
+  transition:
+    color var(--d-fast) ease,
+    background-color var(--d-fast) ease,
+    box-shadow var(--d-fast) ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .tabs__i:hover {
+    color: var(--text);
+  }
+}
+.tabs__i.on {
+  color: var(--accent);
+  background: var(--glass-lo);
+  box-shadow: var(--nm-inset-sm);
+}
+
+/* ── user identity card ───────────────────────────────────────────────────── */
+.usergrid {
+  display: grid;
+  gap: var(--s4);
+  margin-bottom: var(--s2);
+}
+@media (min-width: 860px) {
+  .usergrid {
+    grid-template-columns: minmax(320px, 420px) 1fr;
+    align-items: start;
+  }
+}
+.idcard {
+  position: relative;
+  border-radius: var(--r-lg);
+  padding: var(--s5) var(--s6);
+  background: var(--inverse-grad);
+  color: var(--inverse-text);
+  box-shadow: var(--nm-raise);
+  overflow: hidden;
+}
+.idcard .micro,
+.idcard__hub,
+.idcard__real {
+  color: var(--inverse-muted);
+}
+.idcard__head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+.idcard__hub {
+  flex: 1;
+  font-size: var(--t-small);
+}
+.idcard__name {
+  position: relative;
+  margin-top: var(--s4);
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+  overflow-wrap: anywhere;
+}
+.idcard__real {
+  margin-top: 2px;
+  font-size: var(--t-small);
+}
+.idcard__meta {
+  display: flex;
+  gap: var(--s2);
+  flex-wrap: wrap;
+  margin-top: var(--s3);
+}
+.idcard__foot {
+  display: flex;
+  gap: var(--s5);
+  flex-wrap: wrap;
+  margin-top: var(--s5);
+  padding-top: var(--s3);
+  border-top: 1px solid rgb(0 0 0 / 0.12);
+}
+:root[data-theme="light"] .idcard__foot {
+  border-top-color: rgb(255 255 255 / 0.14);
+}
+.idcard .stat__n {
+  color: inherit;
+}
+
+/* ── policy editor groups ─────────────────────────────────────────────────── */
+.polgroup {
+  margin-top: var(--s2);
+  border-radius: var(--r-ctl);
+  box-shadow: var(--nm-inset-sm);
+  background: var(--glass-lo);
+  overflow: hidden;
+}
+.polgroup__h {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  padding: var(--s3) var(--s4);
+  font-size: var(--t-small);
+  font-weight: 700;
+  color: var(--text-2);
+  text-align: start;
+}
+.polgroup__b {
+  padding: var(--s3) var(--s4) var(--s4);
+}
+
+/* ── hub option lists ─────────────────────────────────────────────────────── */
+.optgrid {
+  display: grid;
+  gap: var(--s1) var(--s4);
+  grid-template-columns: 1fr;
+}
+@media (min-width: 860px) {
+  .optgrid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+.optrow {
+  display: grid;
+  grid-template-columns: 1fr 110px;
+  align-items: center;
+  gap: var(--s3);
+  font-size: var(--t-small);
+}
+.optrow .input {
+  min-height: 34px;
+  padding: 4px 12px;
+}
+
+/* ── row name used as a name+pill line ────────────────────────────────────── */
+.row__name {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex-wrap: wrap;
+  text-align: start;
+  white-space: normal;
+  min-width: 0;
+}
+
+/* ── generic inline list row inside a card ────────────────────────────────── */
+.lrow {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  min-height: 44px;
+  padding: var(--s1) 0;
+  border-bottom: 1px solid var(--glass-line);
+  flex-wrap: wrap;
+}
+.lrow:last-of-type {
+  border-bottom: 0;
+}
+
+/* ── logs split view ──────────────────────────────────────────────────────── */
+.logsplit {
+  display: grid;
+  gap: var(--s4);
+}
+@media (min-width: 960px) {
+  .logsplit {
+    grid-template-columns: minmax(280px, 380px) 1fr;
+    align-items: start;
+  }
+  .logsplit__view .term {
+    min-height: 480px;
+  }
+  .logsplit__view .term__body {
+    max-height: 60vh;
+  }
+}
+.row--on {
+  box-shadow:
+    var(--nm-raise-sm),
+    0 0 0 2px var(--accent-line);
+}
+
+/* ── RPC console ──────────────────────────────────────────────────────────── */
+.console {
+  display: grid;
+  gap: var(--s4);
+}
+@media (min-width: 960px) {
+  .console {
+    grid-template-columns: minmax(280px, 360px) 1fr;
+    align-items: start;
+  }
+}
+.console__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+.console__methods {
+  max-height: 62vh;
+  overflow: auto;
+  border-radius: var(--r-card);
+  background: var(--card-grad);
+  box-shadow: var(--nm-raise-sm);
+}
+.console__m {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  padding: var(--s2) var(--s4);
+  text-align: start;
+  font-size: var(--t-small);
+  color: var(--text-2);
+  border-bottom: 1px solid var(--glass-line);
+}
+.console__m.on {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+@media (hover: hover) and (pointer: fine) {
+  .console__m:hover {
+    background: var(--glass-hi);
+  }
+  .console__m.on:hover {
+    background: var(--accent-soft);
+  }
+}
+.console__work {
+  border-radius: var(--r-card);
+  background: var(--card-grad);
+  box-shadow: var(--nm-raise-sm);
+  padding: var(--s5);
+  min-width: 0;
+}
+.console__result {
+  margin: 0;
+  padding: var(--s3);
+  border-radius: var(--r-ctl);
+  background: var(--canvas);
+  box-shadow: var(--nm-inset-sm);
+  font-size: var(--t-log);
+  line-height: 1.55;
+  max-height: 420px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--a-fg, var(--text-2));
+}
+
+/* ── settings documents ───────────────────────────────────────────────────── */
+.setdoc {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s5);
+}
+.setgrid {
+  display: grid;
+  gap: var(--s4);
+  align-items: start;
+}
+@media (min-width: 1100px) {
+  .setgrid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* ── traffic chart ────────────────────────────────────────────────────────── */
+.chart__legend {
+  display: flex;
+  align-items: center;
+  gap: var(--s4);
+  flex-wrap: wrap;
+  margin-bottom: var(--s3);
+  font-size: var(--t-small);
+  color: var(--text-muted);
+}
+.chart__key {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.chart__key i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.chart__key b {
+  color: var(--text-2);
+  font-weight: 700;
+}
+.chart__hoverv {
+  margin-inline-start: auto;
+  color: var(--text-2);
+  font-size: var(--t-micro);
+}
+.chart__svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  touch-action: none;
+}
+.chart__grid {
+  stroke: var(--glass-line);
+  stroke-width: 1;
+}
+.chart__axis {
+  stroke: var(--glass-line-hi);
+  stroke-width: 1;
+}
+.chart__tick {
+  fill: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.chart__cross {
+  stroke: var(--glass-line-hi);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+.chart--empty {
+  padding: var(--s8) var(--s4);
+  text-align: center;
+}
+
+/* ── the .vpn template, shown in Settings ─────────────────────────────────── */
+.tpl {
+  margin: 0;
+  padding: var(--s3);
+  border-radius: var(--r-ctl);
+  background: var(--canvas);
+  box-shadow: var(--nm-inset-sm);
+  overflow: auto;
+  max-height: 440px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  tab-size: 4;
+}
+.tpl__ph {
+  color: var(--accent);
+  font-weight: 600;
+}
+.tpl__group {
+  margin: var(--s4) 0 var(--s2);
+  padding-top: var(--s3);
+  border-top: 1px solid var(--glass-line);
+  font-size: var(--t-micro);
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.tpl__params {
+  display: grid;
+  gap: var(--s2);
+  margin-bottom: var(--s3);
+}
+.tpl__param {
+  display: grid;
+  grid-template-columns: 156px 1fr;
+  gap: var(--s2);
+  align-items: baseline;
+}
+.tpl__param > .mono {
+  font-size: 12px;
+}
+@media (max-width: 560px) {
+  .tpl__param {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}

@@ -1,0 +1,346 @@
+/*
+ * SoftEther Manager — design tokens (Soft Deck system).
+ *
+ * Language: a soft instrument deck. One canvas colour; every surface is the
+ * same material pushed out of it — cards are extruded with a dual shadow
+ * (light falling from the top-left, shade pooling bottom-right), inputs and
+ * wells are pressed into it, buttons rise and depress. Nothing is separated
+ * by a drawn border; depth does all the separation. Corners are generous,
+ * controls are pills, and one lime accent carries action and health.
+ * Machine text — addresses, versions, logs — stays mono.
+ *
+ * Token names kept stable across restyles:
+ *   --glass      card surface        --glass-hi   raised/hover surface
+ *   --glass-lo   inset well/input    --glass-line faint divider (tables only)
+ *   --nm-raise / --nm-raise-sm / --nm-inset  the extrusion system
+ */
+
+/* Fonts are declared in the document head against files in public/, with
+ * relative URLs, so they resolve under any install prefix. */
+
+:root {
+  --font-ui: "Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+
+  /* ── type ─────────────────────────────────────────────────────────────── */
+  --t-page: 1.625rem;    /* 26 — the greeting / page titles, bold */
+  --t-section: 0.9375rem;/* 15 — card/section titles, bold */
+  --t-name: 0.875rem;    /* 14 — row names */
+  --t-body: 0.875rem;    /* 14 */
+  --t-small: 0.8125rem;  /* 13 */
+  --t-data: 0.8125rem;   /* 13 — mono values */
+  --t-micro: 0.75rem;    /* 12 */
+  --t-log: 0.8125rem;
+  --t-kpi: 1.75rem;      /* 28 — the one figure a card exists to show */
+
+  /* ── space ────────────────────────────────────────────────────────────── */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 20px;
+  --s6: 24px;
+  --s8: 32px;
+  --s12: 48px;
+
+  /* ── shape — soft, generous ──────────────────────────────────────────── */
+  --r-chip: 10px;
+  --r-ctl: 14px;
+  --r-card: 20px;
+  --r-lg: 24px;
+  --r-sheet: 28px;
+  --r-pill: 999px;
+
+  /* ── layout ───────────────────────────────────────────────────────────── */
+  --rail-w: 248px;
+  --rail-w-min: 84px;
+  --canvas-max: 1560px;
+  --tabbar-h: 60px;
+  --topbar-h: 54px;
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+
+  /* ── motion ───────────────────────────────────────────────────────────── */
+  --ease-out-quart: cubic-bezier(0.165, 0.84, 0.44, 1);
+  --ease-out-quint: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out-quart: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --d-press: 100ms;
+  --d-fast: 150ms;
+  --d-quick: 200ms;
+  --d-modal: 300ms;
+  --d-sheet: 380ms;
+
+  /* ══ DARK (primary) ═══════════════════════════════════════════════════ */
+  --bg: #16181d;        /* the one canvas everything is made of */
+  --panel: #16181d;     /* content shares the canvas — no frame */
+  --canvas: #0c0d10;    /* deepest well: logs, code */
+
+  --glass: #1d2026;     /* card face */
+  --glass-hi: #232730;  /* hover, raised sheets */
+  --glass-lo: #101216;  /* pressed wells, inputs */
+  --glass-line: rgb(255 255 255 / 0.06);
+  --glass-line-hi: rgb(255 255 255 / 0.12);
+
+  /* the extrusion system */
+  --card-grad: linear-gradient(150deg, #21252c, #191c21);
+  --nm-raise:
+    inset 0 1px 0 rgb(255 255 255 / 0.05),
+    -8px -8px 20px rgb(255 255 255 / 0.035),
+    10px 12px 26px rgb(0 0 0 / 0.5);
+  --nm-raise-sm:
+    inset 0 1px 0 rgb(255 255 255 / 0.05),
+    -4px -4px 10px rgb(255 255 255 / 0.035),
+    5px 6px 14px rgb(0 0 0 / 0.45);
+  --nm-inset:
+    inset 4px 4px 9px rgb(0 0 0 / 0.5),
+    inset -3px -3px 8px rgb(255 255 255 / 0.035);
+  --nm-inset-sm:
+    inset 2px 2px 5px rgb(0 0 0 / 0.5),
+    inset -2px -2px 5px rgb(255 255 255 / 0.035);
+
+  /* the inverse card — the one light surface on the deck. Its buttons carry
+     their own fills: the card's ground is the opposite of the page's, so the
+     deck's own button tokens would be invisible on it. */
+  --inverse-grad: linear-gradient(150deg, #e9e6df, #c9c6bf);
+  --inverse-text: #1b1d22;
+  --inverse-muted: #56585f;
+  --inverse-btn: rgb(255 255 255 / 0.92);
+  --inverse-btn-ink: #1b1d22;
+  --inverse-btn-ghost: rgb(0 0 0 / 0.08);
+  --inverse-btn-ghost-hi: rgb(0 0 0 / 0.14);
+
+  --text: #e8e9eb;
+  --text-2: #c3c6cb;
+  --text-muted: #8f939b;
+  --text-faint: #63666e;
+
+  /* the one accent — lime */
+  --accent: #8fd94a;
+  --accent-strong: #a5e668;
+  --accent-ink: #16210a;
+  --accent-soft: rgb(143 217 74 / 0.12);
+  --accent-line: rgb(143 217 74 / 0.35);
+  --accent-2: #8fd94a; /* legacy alias */
+
+  /* the primary action: a lit lime pill */
+  --action-bg: #8fd94a;
+  --action-bg-hi: #a0e35f;
+  --action-fg: #16210a;
+  --action-line: rgb(143 217 74 / 0);
+
+  --ok: #8fd94a;
+  --ok-soft: rgb(143 217 74 / 0.12);
+  --ok-line: rgb(143 217 74 / 0.3);
+  --warn: #f0b64a;
+  --warn-soft: rgb(240 182 74 / 0.12);
+  --warn-line: rgb(240 182 74 / 0.3);
+  --err: #f57a7a;
+  --err-soft: rgb(245 122 122 / 0.12);
+  --err-line: rgb(245 122 122 / 0.32);
+  --busy: #b18cff;
+  --busy-soft: rgb(177 140 255 / 0.12);
+  --busy-line: rgb(177 140 255 / 0.32);
+  /* chart series — lime/violet separate under CVD against the card face */
+  --chart-recv: #8fd94a;
+  --chart-send: #b18cff;
+  --idle: #878b93;
+  --idle-soft: rgb(135 139 147 / 0.12);
+  --idle-line: rgb(135 139 147 / 0.28);
+
+  /* log colours, on the dark well */
+  --a-fg: #c6c9ce;
+  --a-dim: #63666e;
+  --a-green: #8fd94a;
+  --a-red: #ff9090;
+  --a-cyan: #62c5ff;
+
+  /* legacy depth aliases: cards raise, they do not outline */
+  --edge: var(--nm-raise-sm);
+  --sheen: 0 0 #0000;
+  --drop: 0 0 #0000;
+  --drop-lg: -10px -10px 30px rgb(255 255 255 / 0.03), 18px 22px 50px rgb(0 0 0 / 0.6);
+  --glow: 0 0 #0000;
+  --scrim: rgb(6 7 9 / 0.66);
+  --blur: 0px;
+  --blur-sm: 0px;
+
+  color-scheme: dark;
+}
+
+/* ══ LIGHT — classic soft UI ═════════════════════════════════════════════ */
+:root[data-theme="light"] {
+  --bg: #e3e7ee;
+  --panel: #e3e7ee;
+  --canvas: #d5dae3;
+
+  --glass: #e6eaf1;
+  --glass-hi: #edf0f6;
+  --glass-lo: #dde1e9;
+  --glass-line: rgb(70 85 110 / 0.1);
+  --glass-line-hi: rgb(70 85 110 / 0.2);
+
+  --card-grad: linear-gradient(150deg, #eef1f7, #dfe3ea);
+  --nm-raise:
+    inset 0 1px 0 rgb(255 255 255 / 0.8),
+    -8px -8px 18px rgb(255 255 255 / 0.85),
+    10px 12px 24px rgb(148 162 184 / 0.5);
+  --nm-raise-sm:
+    inset 0 1px 0 rgb(255 255 255 / 0.8),
+    -4px -4px 9px rgb(255 255 255 / 0.85),
+    5px 6px 12px rgb(148 162 184 / 0.5);
+  --nm-inset:
+    inset 4px 4px 9px rgb(148 162 184 / 0.55),
+    inset -4px -4px 9px rgb(255 255 255 / 0.9);
+  --nm-inset-sm:
+    inset 2px 2px 5px rgb(148 162 184 / 0.55),
+    inset -2px -2px 5px rgb(255 255 255 / 0.9);
+
+  /* the inverse card flips dark on the pale deck */
+  --inverse-grad: linear-gradient(150deg, #2b2e35, #1b1d22);
+  --inverse-text: #f0f1f3;
+  --inverse-muted: #a5a8af;
+  /* the card is dark here, so the ghost lifts with light rather than shade */
+  --inverse-btn: rgb(255 255 255 / 0.95);
+  --inverse-btn-ink: #1b1d22;
+  --inverse-btn-ghost: rgb(255 255 255 / 0.14);
+  --inverse-btn-ghost-hi: rgb(255 255 255 / 0.22);
+
+  --text: #262a33;
+  --text-2: #454b58;
+  --text-muted: #69707f;
+  --text-faint: #949bab;
+
+  --accent: #547d14;
+  --accent-strong: #446409;
+  --accent-ink: #ffffff;
+  --accent-soft: rgb(122 173 47 / 0.16);
+  --accent-line: rgb(122 173 47 / 0.4);
+  --accent-2: #547d14;
+
+  /* the primary action stays a lit lime pill */
+  --action-bg: #7ec93b;
+  --action-bg-hi: #8bd44b;
+  --action-fg: #1a2b07;
+  --action-line: rgb(126 201 59 / 0);
+
+  --ok: #4c7a0d;
+  --ok-soft: rgb(101 152 26 / 0.15);
+  --ok-line: rgb(101 152 26 / 0.35);
+  --warn: #9d6407;
+  --warn-soft: rgb(179 118 12 / 0.14);
+  --warn-line: rgb(179 118 12 / 0.32);
+  --err: #c73d4b;
+  --err-soft: rgb(199 61 75 / 0.12);
+  --err-line: rgb(199 61 75 / 0.3);
+  --busy: #7443c9;
+  --busy-soft: rgb(116 67 201 / 0.12);
+  --busy-line: rgb(116 67 201 / 0.3);
+  --chart-recv: #5c8f14;
+  --chart-send: #7443c9;
+  --idle: #7d8494;
+  --idle-soft: rgb(125 132 148 / 0.14);
+  --idle-line: rgb(125 132 148 / 0.32);
+
+  --a-fg: #3a4150;
+  --a-dim: #949bab;
+  --a-green: #4c7a0d;
+  --a-red: #b8323f;
+  --a-cyan: #0b6ea6;
+
+  --edge: var(--nm-raise-sm);
+  --sheen: 0 0 #0000;
+  --drop: 0 0 #0000;
+  --drop-lg: -10px -10px 26px rgb(255 255 255 / 0.9), 18px 22px 44px rgb(148 162 184 / 0.6);
+  --glow: 0 0 #0000;
+  --scrim: rgb(58 68 88 / 0.35);
+
+  color-scheme: light;
+}
+
+/* System preference — only while the operator has not chosen explicitly. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]):not([data-theme="light"]) {
+    --bg: #e3e7ee;
+    --panel: #e3e7ee;
+    --canvas: #d5dae3;
+
+    --glass: #e6eaf1;
+    --glass-hi: #edf0f6;
+    --glass-lo: #dde1e9;
+    --glass-line: rgb(70 85 110 / 0.1);
+    --glass-line-hi: rgb(70 85 110 / 0.2);
+
+    --card-grad: linear-gradient(150deg, #eef1f7, #dfe3ea);
+    --nm-raise:
+      inset 0 1px 0 rgb(255 255 255 / 0.8),
+      -8px -8px 18px rgb(255 255 255 / 0.85),
+      10px 12px 24px rgb(148 162 184 / 0.5);
+    --nm-raise-sm:
+      inset 0 1px 0 rgb(255 255 255 / 0.8),
+      -4px -4px 9px rgb(255 255 255 / 0.85),
+      5px 6px 12px rgb(148 162 184 / 0.5);
+    --nm-inset:
+      inset 4px 4px 9px rgb(148 162 184 / 0.55),
+      inset -4px -4px 9px rgb(255 255 255 / 0.9);
+    --nm-inset-sm:
+      inset 2px 2px 5px rgb(148 162 184 / 0.55),
+      inset -2px -2px 5px rgb(255 255 255 / 0.9);
+
+    --inverse-grad: linear-gradient(150deg, #2b2e35, #1b1d22);
+    --inverse-text: #f0f1f3;
+    --inverse-muted: #a5a8af;
+
+    --text: #262a33;
+    --text-2: #454b58;
+    --text-muted: #69707f;
+    --text-faint: #949bab;
+
+    --accent: #547d14;
+    --accent-strong: #446409;
+    --accent-ink: #ffffff;
+    --accent-soft: rgb(122 173 47 / 0.16);
+    --accent-line: rgb(122 173 47 / 0.4);
+    --accent-2: #547d14;
+
+    --action-bg: #7ec93b;
+    --action-bg-hi: #8bd44b;
+    --action-fg: #1a2b07;
+    --action-line: rgb(126 201 59 / 0);
+
+    --ok: #4c7a0d;
+    --ok-soft: rgb(101 152 26 / 0.15);
+    --ok-line: rgb(101 152 26 / 0.35);
+    --warn: #9d6407;
+    --warn-soft: rgb(179 118 12 / 0.14);
+    --warn-line: rgb(179 118 12 / 0.32);
+    --err: #c73d4b;
+    --err-soft: rgb(199 61 75 / 0.12);
+    --err-line: rgb(199 61 75 / 0.3);
+    --busy: #7443c9;
+    --busy-soft: rgb(116 67 201 / 0.12);
+    --busy-line: rgb(116 67 201 / 0.3);
+    --chart-recv: #5c8f14;
+    --chart-send: #7443c9;
+    --idle: #7d8494;
+    --idle-soft: rgb(125 132 148 / 0.14);
+    --idle-line: rgb(125 132 148 / 0.32);
+
+    --a-fg: #3a4150;
+    --a-dim: #949bab;
+    --a-green: #4c7a0d;
+    --a-red: #b8323f;
+    --a-cyan: #0b6ea6;
+
+    --edge: var(--nm-raise-sm);
+    --sheen: 0 0 #0000;
+    --drop: 0 0 #0000;
+    --drop-lg: -10px -10px 26px rgb(255 255 255 / 0.9), 18px 22px 44px rgb(148 162 184 / 0.6);
+    --glow: 0 0 #0000;
+    --scrim: rgb(58 68 88 / 0.35);
+
+    color-scheme: light;
+  }
+}

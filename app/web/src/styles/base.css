@@ -1,0 +1,172 @@
+/* Reset, document rules, and the mobile-native document details. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  overflow-x: clip;
+  overscroll-behavior-y: none;
+}
+
+body {
+  margin: 0;
+  min-height: 100svh;
+  overscroll-behavior-y: none;
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--t-body);
+  line-height: 1.55;
+  font-weight: 500; /* Manrope reads light; medium is its body weight */
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  /* Machine values must align and never confuse 0 with O. */
+  font-variant-numeric: tabular-nums slashed-zero;
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+  min-height: 100svh;
+}
+
+/* Soft UI carries hierarchy with weight: headings are properly bold. */
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+  color: var(--text);
+}
+
+p {
+  margin: 0;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+  margin: 0;
+}
+
+button {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+button,
+a,
+label,
+[role="button"],
+[role="tab"] {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+
+/* Machine data stays selectable: addresses, keys, log output. */
+code,
+pre,
+.mono,
+.selectable,
+.term,
+.data {
+  user-select: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: default;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: var(--r-chip);
+}
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+::placeholder {
+  color: var(--text-faint);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--glass-line-hi) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--glass-line-hi);
+  border-radius: 99px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+  font-weight: 400;
+}
+.micro {
+  font-size: var(--t-micro);
+  font-weight: 600;
+  color: var(--text-faint);
+}
+.muted {
+  color: var(--text-muted);
+}
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* No transitions during first paint or a theme swap. */
+.preload *,
+.preload *::before,
+.preload *::after {
+  transition: none !important;
+  animation: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

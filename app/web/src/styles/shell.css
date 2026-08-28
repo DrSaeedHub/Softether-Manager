@@ -1,0 +1,607 @@
+/*
+ * App shell.
+ *
+ * >= 960px  a soft sidebar on the canvas: labelled destinations with the
+ *           hubs listed beneath, collapsible down to a column of icon keys
+ *           (expanded by default; the choice sticks). Content floats beside
+ *           it on the same canvas — no frame, the cards are the structure.
+ * < 960px   a native-app shell: solid top bar, one scrolling region, and a
+ *           bottom tab bar.
+ */
+
+/* ═════════════════════════════════════════════════════════ mobile shell ══ */
+
+.shell {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 100svh;
+  padding-inline: var(--safe-l) var(--safe-r);
+  background: var(--bg);
+}
+
+.shell__scroll {
+  min-width: 0;
+  padding-bottom: calc(var(--tabbar-h) + var(--safe-b) + var(--s6));
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  min-height: var(--topbar-h);
+  padding: var(--s2) var(--s4);
+  padding-top: calc(var(--s2) + var(--safe-t));
+  background: color-mix(in srgb, var(--bg) 90%, transparent);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+.topbar__title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-name);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.topbar__back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  margin-inline-start: -4px;
+  border-radius: 50%;
+  color: var(--text-2);
+  flex: none;
+}
+.topbar__back:active {
+  background: var(--glass-lo);
+  box-shadow: var(--nm-inset-sm);
+}
+[dir="rtl"] .topbar__back svg {
+  transform: scaleX(-1);
+}
+
+.tabbar {
+  position: fixed;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: 40;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  min-height: var(--tabbar-h);
+  padding-bottom: var(--safe-b);
+  padding-inline: var(--safe-l) var(--safe-r);
+  background: color-mix(in srgb, var(--bg) 90%, transparent);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 -10px 30px rgb(0 0 0 / 0.25);
+}
+.tab {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-height: 50px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--text-faint);
+  transition: color var(--d-fast) ease;
+}
+.tab:active {
+  opacity: 0.6;
+}
+.tab[aria-current="page"] {
+  color: var(--accent);
+}
+.tab svg {
+  width: 21px;
+  height: 21px;
+}
+
+/* ════════════════════════════════════════════════════════ desktop shell ══ */
+
+.side {
+  display: none;
+}
+.mainbar {
+  display: none;
+}
+
+@media (min-width: 960px) {
+  .shell {
+    grid-template-rows: 1fr;
+    grid-template-columns: var(--rail-w) minmax(0, 1fr);
+    height: 100svh;
+    overflow: hidden;
+    transition: grid-template-columns 260ms var(--ease-out-quart);
+  }
+  .shell--min {
+    grid-template-columns: var(--rail-w-min) minmax(0, 1fr);
+  }
+  .shell__scroll {
+    overflow-y: auto;
+    padding-bottom: 0;
+  }
+  .topbar,
+  .tabbar {
+    display: none;
+  }
+
+  /* utility cluster at the top of the content */
+  .mainbar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--s3);
+    padding: var(--s6) var(--s8) 0;
+    max-width: var(--canvas-max);
+    margin: 0 auto;
+    width: 100%;
+  }
+
+  /* ── the sidebar ──────────────────────────────────────────────────── */
+  .side {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    min-width: 0;
+    padding: var(--s5) var(--s3);
+    overflow: hidden;
+  }
+  .side__top {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    padding: 0 var(--s1) var(--s4);
+  }
+  .side__brand {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--s3);
+  }
+  .side__word {
+    display: block;
+    font-size: 14.5px;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    color: var(--text);
+    line-height: 1.2;
+  }
+  .side__sub {
+    display: block;
+    font-size: var(--t-micro);
+    font-weight: 600;
+    color: var(--text-faint);
+  }
+  /* collapse points the chevron back in; expand points it out */
+  .side__fold {
+    flex: none;
+    width: 30px;
+    height: 30px;
+  }
+  .side__fold svg {
+    transform: rotate(180deg);
+    transition: transform var(--d-quick) var(--ease-out-quart);
+  }
+  .shell--min .side__fold svg {
+    transform: none;
+  }
+  [dir="rtl"] .side__fold svg {
+    transform: none;
+  }
+  [dir="rtl"] .shell--min .side__fold svg {
+    transform: rotate(180deg);
+  }
+
+  .side__nav {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: var(--s1);
+  }
+  /* one destination, one soft key; the active one is pressed and lit */
+  .side__item {
+    display: flex;
+    align-items: center;
+    gap: var(--s3);
+    min-height: 44px;
+    padding: 0 var(--s3);
+    border-radius: var(--r-ctl);
+    font-size: var(--t-small);
+    font-weight: 700;
+    color: var(--text-muted);
+    text-align: start;
+    white-space: nowrap;
+    transition:
+      color var(--d-fast) ease,
+      box-shadow var(--d-quick) ease,
+      background var(--d-quick) ease;
+  }
+  .side__item > svg {
+    flex: none;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .side__item:hover {
+      color: var(--text-2);
+      background: var(--card-grad);
+      box-shadow: var(--nm-raise-sm);
+    }
+  }
+  .side__item.on {
+    color: var(--accent);
+    background: var(--glass-lo);
+    box-shadow: var(--nm-inset-sm);
+  }
+  .side__item:active {
+    background: var(--glass-lo);
+    box-shadow: var(--nm-inset-sm);
+  }
+  .side__item .side__label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* the hubs group */
+  .side__group {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: var(--s1) 0;
+  }
+  .side__gtitle {
+    padding: var(--s2) var(--s3) 2px;
+    font-size: var(--t-micro);
+    font-weight: 700;
+    color: var(--text-faint);
+  }
+  .side__leaf {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 36px;
+    padding: 0 var(--s3) 0 var(--s4);
+    border-radius: var(--r-ctl);
+    font-size: var(--t-small);
+    font-weight: 600;
+    color: var(--text-muted);
+    text-align: start;
+    transition:
+      color var(--d-fast) ease,
+      box-shadow var(--d-quick) ease,
+      background var(--d-quick) ease;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .side__leaf:hover {
+      color: var(--text-2);
+      background: var(--card-grad);
+      box-shadow: var(--nm-raise-sm);
+    }
+  }
+  .side__leaf.on {
+    color: var(--text);
+    background: var(--glass-lo);
+    box-shadow: var(--nm-inset-sm);
+  }
+  .side__leaf .side__label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* the status lamp on a hub entry — coloured by data-state */
+  .side__dot {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--sig, var(--idle));
+  }
+  [data-state="connected"] > .side__dot {
+    box-shadow: 0 0 0 3px var(--ok-soft);
+  }
+  .side__count {
+    flex: none;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-faint);
+  }
+
+  .side__foot {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    padding: var(--s3) var(--s1) 0;
+  }
+  .side__user {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px;
+    border-radius: var(--r-pill);
+    font-size: var(--t-small);
+    font-weight: 700;
+    color: var(--text-2);
+    text-align: start;
+    transition:
+      box-shadow var(--d-fast) ease,
+      background var(--d-fast) ease;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .side__user:hover {
+      background: var(--card-grad);
+      box-shadow: var(--nm-raise-sm);
+    }
+    .side__user:hover .side__out {
+      color: var(--err);
+    }
+  }
+  /* the operator: an initial in a soft coin */
+  .side__coin {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: var(--card-grad);
+    box-shadow: var(--nm-raise-sm);
+    font-size: 14px;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+  .side__out {
+    flex: none;
+    display: inline-flex;
+    color: var(--text-faint);
+    padding-inline-end: var(--s2);
+    transition: color var(--d-fast) ease;
+  }
+
+  /* ── collapsed: the icon dock ─────────────────────────────────────── */
+  .shell--min .side {
+    padding-inline: 0;
+    align-items: center;
+  }
+  .shell--min .side__label,
+  .shell--min .side__count,
+  .shell--min .side__out {
+    display: none;
+  }
+  .shell--min .side__top {
+    flex-direction: column;
+    gap: var(--s3);
+    padding-inline: 0;
+  }
+  .shell--min .side__nav {
+    align-items: center;
+    width: 100%;
+  }
+  .shell--min .side__item {
+    justify-content: center;
+    width: 46px;
+    min-height: 46px;
+    padding: 0;
+  }
+  .shell--min .side__foot {
+    flex-direction: column;
+    gap: var(--s3);
+    padding-inline: 0;
+  }
+  .shell--min .side__user {
+    padding: 0;
+  }
+  .shell--min .side__coin {
+    width: 42px;
+    height: 42px;
+  }
+}
+
+/* ══════════════════════════════════════════════════ header status chips ══ */
+
+.mchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: var(--r-pill);
+  font-size: var(--t-micro);
+  font-weight: 700;
+  white-space: nowrap;
+  color: var(--text-2);
+  background: var(--card-grad);
+  box-shadow: var(--nm-raise-sm);
+}
+.mchip svg {
+  flex: none;
+}
+.mchip--ok {
+  color: var(--ok);
+}
+.mchip--err {
+  color: var(--err);
+}
+.mchip__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.mchip--live .mchip__dot {
+  animation: live-pulse 1.8s var(--ease-in-out-quart) infinite;
+}
+@keyframes live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════ page ══ */
+
+.page {
+  width: 100%;
+  max-width: var(--canvas-max);
+  margin: 0 auto;
+  padding: var(--s4);
+}
+@media (min-width: 960px) {
+  .page {
+    padding: var(--s5) var(--s8) var(--s12);
+  }
+}
+
+.page__head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--s4);
+  flex-wrap: wrap;
+  margin-bottom: var(--s6);
+}
+.page__title {
+  font-size: var(--t-page);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  color: var(--text);
+}
+.page__sub {
+  margin-top: 6px;
+  font-size: var(--t-small);
+  color: var(--text-muted);
+  max-width: 60ch;
+}
+.page__actions {
+  display: flex;
+  gap: var(--s2);
+  flex-wrap: wrap;
+}
+
+.section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  margin: var(--s8) 0 var(--s4);
+}
+.section__t {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  font-size: var(--t-section);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.section__n {
+  font-size: var(--t-small);
+  font-weight: 700;
+  color: var(--text-faint);
+}
+
+/* ════════════════════════════════════════════════ theme + version chrome ══ */
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  color: var(--text-muted);
+  transition:
+    color var(--d-fast) ease,
+    box-shadow var(--d-fast) ease,
+    background var(--d-fast) ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .icon-btn:hover {
+    color: var(--text);
+    background: var(--card-grad);
+    box-shadow: var(--nm-raise-sm);
+  }
+}
+.icon-btn:active {
+  background: var(--glass-lo);
+  box-shadow: var(--nm-inset-sm);
+}
+
+.verpill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: var(--r-pill);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--text-muted);
+  background: var(--card-grad);
+  box-shadow: var(--nm-raise-sm);
+  transition:
+    color var(--d-fast) ease,
+    box-shadow var(--d-fast) ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .verpill:hover {
+    color: var(--text);
+  }
+}
+.verpill:active {
+  box-shadow: var(--nm-inset-sm);
+}
+.verpill--new {
+  color: var(--accent);
+}
+.verpill__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* ═══════════════════════════════════════════════════ the greeting header ══ */
+
+.hello {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--s4);
+  flex-wrap: wrap;
+  margin-bottom: var(--s6);
+}
+.hello__t {
+  font-size: var(--t-page);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+.hello__s {
+  margin-top: 6px;
+  font-size: var(--t-small);
+  color: var(--text-muted);
+}

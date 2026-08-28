@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Packaging / distribution
+build/lib/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Testing and coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local secrets and scratch work
+*.local
+.env
+*.pem
+*.key
+*.cer
+*.p12
+vpn_server.config
+scratch/
+tmp/
+node_modules/
+app/web/out/
+app/web/.next/
+*.db
+/data/
+/dist/

@@ -1,0 +1,407 @@
+#!/usr/bin/env bash
+#
+# sem -- the SoftEther Manager management CLI.
+#
+# Everything here has a browser equivalent. The difference is that these keep
+# working when the browser one cannot be reached: nobody knows the password,
+# the web path was forgotten, the panel will not start. That is what this tool
+# is for, and why it talks to systemd and to the database rather than to the
+# panel's own API.
+#
+# Run it with no arguments for a menu.
+#
+set -euo pipefail
+
+# The panel's self-update runs this inside a transient systemd unit, which has
+# no HOME; the gh CLI needs one to find its credentials on a private repo.
+export HOME="${HOME:-/root}"
+
+readonly SUPPORT_DIR="/usr/local/share/softether-manager"
+readonly CLI_ENV_PATH="$SUPPORT_DIR/cli.env"
+readonly CACHED_INSTALLER="$SUPPORT_DIR/install.sh"
+readonly DEFAULT_REPO="DrSaeedHub/Softether-Manager"
+
+# Defaults, overridden by whatever the installer recorded. A host installed
+# from a fork keeps following the fork, because these came from the install.
+APP_DIR="/opt/softether-manager"
+ENV_PATH="/etc/softether-manager.env"
+DATA_DIR="/var/lib/softether-manager"
+SERVICE_NAME="softether-manager"
+RELEASE_REPO="$DEFAULT_REPO"
+RELEASE_BASE="https://github.com/$DEFAULT_REPO/releases/download"
+INSTALLER_URL="https://raw.githubusercontent.com/$DEFAULT_REPO/master/scripts/install.sh"
+
+if [[ -f "$CLI_ENV_PATH" ]]; then
+  # A file this script wrote itself, holding no secrets, so sourcing it is safe.
+  # shellcheck disable=SC1090
+  . "$CLI_ENV_PATH"
+fi
+
+VENV_PYTHON="$APP_DIR/.venv/bin/python"
+
+say() { printf '%s\n' "$*" >&2; }
+step() { printf '\033[1;34m==>\033[0m %s\n' "$*" >&2; }
+warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
+die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+
+require_root() {
+  [[ $EUID -eq 0 ]] || die "This has to run as root."
+}
+
+usage() {
+  cat >&2 <<'USAGE'
+sem -- manage the SoftEther Manager panel on this server.
+
+  sem                      Open the menu
+  sem status               Version, service state and the URL the panel is on
+  sem url                  Print the panel's URL
+  sem start|stop|restart   Control the service
+  sem logs [-n 100] [-f]   Read the service log
+  sem update [--version v] Install the newest release (or a named one)
+  sem password             Set an account's password, creating it if needed
+  sem users                List the accounts that can sign in
+  sem port <port>          Move the panel to another port
+  sem path <path|none>     Change the secret web path ('none' serves at the root)
+  sem edit-env             Edit the environment file, then restart
+  sem uninstall            Remove the panel
+  sem version              Print the installed version
+
+Flags: --yes skips confirmation, --version <tag> picks a release for update.
+The SoftEther VPN Server this panel manages is its own service; nothing here
+touches it.
+USAGE
+}
+
+# --------------------------------------------------------------- reading state
+
+installed_version() {
+  if [[ -f "$APP_DIR/VERSION" ]]; then
+    head -n1 "$APP_DIR/VERSION"
+  else
+    printf 'unknown'
+  fi
+}
+
+service_state() {
+  systemctl is-active "$SERVICE_NAME" 2>/dev/null || true
+}
+
+# The address is asked of the panel's own code rather than read from the
+# environment file: the file is a seed, and the Settings page can have moved
+# the web path since. `python -m app.address` answers with what is stored.
+address_json() {
+  [[ -x "$VENV_PYTHON" ]] || return 1
+  (cd "$APP_DIR" && set -a && . "$ENV_PATH" && set +a && "$VENV_PYTHON" -m app.address 2>/dev/null)
+}
+
+json_field() {
+  local json="$1" key="$2"
+  printf '%s' "$json" | sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"\{0,1\}\([^\",}]*\)\"\{0,1\}.*/\1/p" | head -n1
+}
+
+env_value() {
+  local key="$1"
+  [[ -f "$ENV_PATH" ]] || return 1
+  sed -n "s/^${key}=//p" "$ENV_PATH" | tail -n1
+}
+
+panel_url() {
+  local json port path host
+  json="$(address_json || true)"
+  if [[ -n "$json" ]]; then
+    port="$(json_field "$json" port)"
+    path="$(json_field "$json" web_path)"
+  fi
+  [[ -n "${port:-}" ]] || port="$(env_value SEM_BIND_PORT || true)"
+  [[ -n "${path:-}" ]] || path="$(env_value SEM_WEB_PATH || true)"
+  host="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  [[ -n "$host" ]] || host="127.0.0.1"
+  if [[ -z "${path:-}" ]]; then
+    printf 'http://%s:%s/' "$host" "${port:-8000}"
+  else
+    printf 'http://%s:%s/%s/' "$host" "${port:-8000}" "$path"
+  fi
+}
+
+cmd_status() {
+  local state json
+  state="$(service_state)"
+  json="$(address_json || true)"
+  say ""
+  say "  Version:  $(installed_version)"
+  say "  Service:  $SERVICE_NAME ($([[ -n "$state" ]] && printf '%s' "$state" || printf 'not installed'))"
+  say "  URL:      $(panel_url)"
+  if [[ -n "$json" ]]; then
+    local stored_path file_path
+    stored_path="$(json_field "$json" web_path)"
+    file_path="$(env_value SEM_WEB_PATH || true)"
+    # Saying so out loud matters: the file is what an operator reads when they
+    # cannot reach the panel, and it may disagree with the database.
+    if [[ "$stored_path" != "$file_path" ]]; then
+      say ""
+      warn "The stored web path and $ENV_PATH disagree."
+      say "  stored:  '${stored_path:-(root)}'   <- what the panel uses"
+      say "  file:    '${file_path:-(root)}'"
+    fi
+  fi
+  say "  Files:    $APP_DIR"
+  say "  Data:     $DATA_DIR"
+  say "  Source:   $RELEASE_REPO"
+  say ""
+  if [[ -n "$state" && "$state" != "active" ]]; then
+    say "The service is not running. The last few lines of its log:"
+    journalctl -u "$SERVICE_NAME" -n 15 --no-pager 2>/dev/null || true
+    say ""
+  fi
+}
+
+# --------------------------------------------------------------- the installer
+
+# The cached copy is preferred over the network: the most likely reason
+# somebody is running this is that something is already wrong, and requiring a
+# download then is unkind. It is refreshed when missing, or when an update is
+# asked for -- an update should install the newest installer too.
+run_installer() {
+  local refresh="$1"
+  shift
+  local script="$CACHED_INSTALLER"
+
+  if [[ "$refresh" == "refresh" || ! -f "$script" ]]; then
+    local fresh
+    fresh="$(mktemp)"
+    if curl -fsSL --connect-timeout 15 --retry 2 -o "$fresh" "$INSTALLER_URL" 2>/dev/null ||
+       wget -q --timeout=15 --tries=3 -O "$fresh" "$INSTALLER_URL" 2>/dev/null ||
+       { command -v gh >/dev/null 2>&1 &&
+         gh api "repos/$RELEASE_REPO/contents/scripts/install.sh" \
+           -H 'Accept: application/vnd.github.raw' > "$fresh" 2>/dev/null && [[ -s "$fresh" ]]; }; then
+      if bash -n "$fresh" 2>/dev/null; then
+        script="$fresh"
+      else
+        rm -f "$fresh"
+        [[ -f "$CACHED_INSTALLER" ]] || die "The installer downloaded from $INSTALLER_URL is not a valid script."
+        warn "The downloaded installer did not parse; using the cached copy."
+      fi
+    else
+      rm -f "$fresh"
+      [[ -f "$CACHED_INSTALLER" ]] ||
+        die "The installer could not be downloaded from $INSTALLER_URL and there is no cached copy."
+      warn "The installer could not be downloaded; using the cached copy."
+    fi
+  fi
+
+  bash "$script" --repo "$RELEASE_REPO" --release-base "$RELEASE_BASE" \
+    --installer-url "$INSTALLER_URL" "$@"
+}
+
+cmd_update() {
+  require_root
+  local version="latest" assume_yes=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --version) version="${2:-latest}"; shift 2 ;;
+      --yes|-y) assume_yes=1; shift ;;
+      *) die "Unknown argument to update: $1" ;;
+    esac
+  done
+
+  if (( assume_yes == 0 )); then
+    say ""
+    say "This installs $version over the running panel."
+    say "The database, the account, the registered servers and the traffic history are kept."
+    say "The panel restarts at the end, so open sessions drop for a moment."
+    read -r -p "Continue? [y/N] " reply </dev/tty || true
+    [[ "$reply" =~ ^[Yy]$ ]] || { say "Nothing was changed."; exit 0; }
+  fi
+
+  step "Updating to $version"
+  run_installer refresh --upgrade --version "$version" --yes --no-menu
+}
+
+cmd_password() {
+  require_root
+  [[ -x "$VENV_PYTHON" ]] || die "The panel is not installed here."
+  local username="" password=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --username) username="${2:-}"; shift 2 ;;
+      --password) password="${2:-}"; shift 2 ;;
+      *) die "Unknown argument to password: $1" ;;
+    esac
+  done
+
+  if [[ -z "$username" ]]; then
+    read -r -p "Username [admin]: " username </dev/tty || true
+    username="${username:-admin}"
+  fi
+  if [[ -z "$password" ]]; then
+    local confirm=""
+    while :; do
+      read -r -s -p "New password: " password </dev/tty || true
+      printf '\n' >&2
+      (( ${#password} >= 8 )) || { warn "At least 8 characters."; continue; }
+      read -r -s -p "Confirm password: " confirm </dev/tty || true
+      printf '\n' >&2
+      [[ "$password" == "$confirm" ]] && break
+      warn "The two passwords do not match."
+    done
+  fi
+
+  (cd "$APP_DIR" && set -a && . "$ENV_PATH" && set +a &&
+    "$VENV_PYTHON" -m app.manage password --username "$username" --password "$password")
+}
+
+cmd_users() {
+  require_root
+  [[ -x "$VENV_PYTHON" ]] || die "The panel is not installed here."
+  (cd "$APP_DIR" && set -a && . "$ENV_PATH" && set +a && "$VENV_PYTHON" -m app.manage users)
+}
+
+# The port is an environment fact: systemd hands it to uvicorn at start, so
+# changing it is editing the file and restarting. The web path lives in the
+# database, so changing it goes through app.manage.
+cmd_port() {
+  require_root
+  local port="${1:-}"
+  [[ "$port" =~ ^[0-9]+$ ]] || die "Usage: sem port <port>"
+  (( port > 0 && port < 65536 )) || die "The port must be between 1 and 65535."
+  [[ -f "$ENV_PATH" ]] || die "$ENV_PATH does not exist."
+  if grep -q '^SEM_BIND_PORT=' "$ENV_PATH"; then
+    sed -i "s/^SEM_BIND_PORT=.*/SEM_BIND_PORT=$port/" "$ENV_PATH"
+  else
+    printf 'SEM_BIND_PORT=%s\n' "$port" >> "$ENV_PATH"
+  fi
+  step "Restarting the panel"
+  systemctl restart "$SERVICE_NAME"
+  say ""
+  say "  URL:  $(panel_url)"
+  say ""
+}
+
+cmd_path() {
+  require_root
+  [[ -x "$VENV_PYTHON" ]] || die "The panel is not installed here."
+  local path="${1-}"
+  [[ $# -ge 1 ]] || die "Usage: sem path <path|none>"
+  [[ "${path,,}" == "none" ]] && path=""
+  if [[ -n "$path" && ! "$path" =~ ^[A-Za-z0-9._~-]+$ ]]; then
+    die "The web path may contain only letters, digits, dot, underscore, tilde and hyphen."
+  fi
+  (cd "$APP_DIR" && set -a && . "$ENV_PATH" && set +a &&
+    "$VENV_PYTHON" -m app.manage webpath "$path") >/dev/null
+  step "Restarting the panel"
+  systemctl restart "$SERVICE_NAME"
+  say ""
+  say "  URL:  $(panel_url)"
+  say ""
+}
+
+cmd_logs() {
+  local lines=100 follow=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -n) lines="${2:-100}"; shift 2 ;;
+      -f|--follow) follow=1; shift ;;
+      *) die "Unknown argument to logs: $1" ;;
+    esac
+  done
+  if (( follow == 1 )); then
+    journalctl -u "$SERVICE_NAME" -n "$lines" -f --no-pager
+  else
+    journalctl -u "$SERVICE_NAME" -n "$lines" --no-pager
+  fi
+}
+
+cmd_edit_env() {
+  require_root
+  [[ -f "$ENV_PATH" ]] || die "$ENV_PATH does not exist."
+  "${EDITOR:-nano}" "$ENV_PATH"
+  say ""
+  say "The panel adopts a changed port from this file when it restarts."
+  read -r -p "Restart now? [Y/n] " reply </dev/tty || true
+  [[ "$reply" =~ ^[Nn]$ ]] || { systemctl restart "$SERVICE_NAME"; say "Restarted. URL: $(panel_url)"; }
+}
+
+cmd_uninstall() {
+  require_root
+  run_installer keep --uninstall "$@"
+}
+
+# --------------------------------------------------------------------- menu
+
+menu() {
+  local state url
+  while :; do
+    state="$(service_state)"
+    url="$(panel_url)"
+    printf '\n'
+    printf '  \033[1mSoftEther Manager\033[0m  %s\n' "$(installed_version)"
+    printf '  %s   %s\n' "$([[ "$state" == "active" ]] && printf '\033[32m● running\033[0m' || printf '\033[31m● %s\033[0m' "${state:-not installed}")" "$url"
+    printf '\n'
+    printf '   1) Status\n'
+    printf '   2) Update the panel\n'
+    printf '   3) Reset a password\n'
+    printf '   4) Change the port\n'
+    printf '   5) Change the web path\n'
+    printf '   6) Restart\n'
+    printf '   7) Stop\n'
+    printf '   8) Logs (last 100 lines)\n'
+    printf '   9) Edit the environment file\n'
+    printf '  10) Uninstall\n'
+    printf '   0) Quit\n'
+    printf '\n'
+    local choice=""
+    read -r -p "  Choose: " choice </dev/tty || return 0
+    printf '\n'
+    case "$choice" in
+      1) cmd_status ;;
+      2) cmd_update ;;
+      3) cmd_password ;;
+      4)
+        local port=""
+        read -r -p "  New port: " port </dev/tty || true
+        [[ -n "$port" ]] && cmd_port "$port"
+        ;;
+      5)
+        local path=""
+        say "  A secret prefix the panel is served under. Type none to serve it at the root."
+        read -r -p "  New web path: " path </dev/tty || true
+        [[ -n "$path" ]] && cmd_path "$path"
+        ;;
+      6) systemctl restart "$SERVICE_NAME" && say "Restarted." ;;
+      7) systemctl stop "$SERVICE_NAME" && say "Stopped." ;;
+      8) journalctl -u "$SERVICE_NAME" -n 100 --no-pager || true ;;
+      9) cmd_edit_env ;;
+      10) cmd_uninstall ;;
+      0|q|Q) return 0 ;;
+      *) warn "Not one of the options." ;;
+    esac
+  done
+}
+
+# --------------------------------------------------------------------- entry
+
+command="${1-}"
+[[ $# -gt 0 ]] && shift || true
+
+case "$command" in
+  "")
+    [[ -e /dev/tty ]] || { usage; exit 1; }
+    menu
+    ;;
+  status) cmd_status ;;
+  url) panel_url; printf '\n' ;;
+  start) require_root; systemctl start "$SERVICE_NAME"; say "Started." ;;
+  stop) require_root; systemctl stop "$SERVICE_NAME"; say "Stopped." ;;
+  restart) require_root; systemctl restart "$SERVICE_NAME"; say "Restarted. URL: $(panel_url)" ;;
+  logs) cmd_logs "$@" ;;
+  update) cmd_update "$@" ;;
+  password) cmd_password "$@" ;;
+  users) cmd_users ;;
+  port) cmd_port "${1-}" ;;
+  path) cmd_path "$@" ;;
+  edit-env) cmd_edit_env ;;
+  uninstall) cmd_uninstall "$@" ;;
+  version) installed_version; printf '\n' ;;
+  -h|--help|help) usage ;;
+  *) usage; die "Unknown command: $command" ;;
+esac

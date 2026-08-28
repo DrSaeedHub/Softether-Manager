@@ -1,0 +1,105 @@
+# Build and publish a release on every tag.
+#
+# The version is derived from git, not stored in the source: a tag on the
+# commit produces vMAJOR.MINOR.PATCH, and an untagged commit produces
+# 0.0.0-<sha>, which is deliberately not installable. See claude.md for the
+# tagging rules.
+#
+# On a pushed tag this builds the frontend, packages the one release tarball
+# (app + Library + built frontend + scripts + VERSION), and attaches it and
+# its checksum to a GitHub release marked latest -- which is what
+# `--version latest` and `sem update` resolve to.
+#
+# On a branch push or a pull request it builds and packages the same way but
+# publishes nothing, so a break is caught before a tag depends on it.
+name: release
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  build:
+    name: Build the release tarball
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Full history so `git describe` can name the version from tags.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/web/package-lock.json
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Determine the version
+        id: version
+        run: |
+          VERSION="$(git describe --tags --exact-match 2>/dev/null || echo "0.0.0-$(git rev-parse --short HEAD)")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building $VERSION from $(git rev-parse HEAD)"
+
+      - name: Lint the shell scripts
+        run: |
+          bash -n scripts/install.sh scripts/sem scripts/build-release.sh
+          if command -v shellcheck >/dev/null 2>&1; then
+            shellcheck --severity=warning scripts/install.sh scripts/sem scripts/build-release.sh || true
+          fi
+
+      - name: Compile-check the Python
+        run: python -m compileall -q app Library
+
+      - name: Run the library test suite
+        # One retry: the suite spins up a real TLS server on a loopback socket
+        # and two of its keep-alive tests are timing-sensitive on busy shared
+        # runners. A genuine break fails twice.
+        run: |
+          python -m pip install --quiet cryptography
+          python -m unittest Library.test_softether || python -m unittest Library.test_softether
+
+      - name: Install frontend dependencies
+        working-directory: app/web
+        run: npm ci
+
+      - name: Build the frontend
+        working-directory: app/web
+        run: npm run build
+
+      - name: Package the release tarball
+        run: bash scripts/build-release.sh --version "${{ steps.version.outputs.version }}" --output dist/release --skip-frontend
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: release-${{ steps.version.outputs.version }}
+          path: dist/release/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish the GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ steps.version.outputs.version }}
+          tag_name: ${{ steps.version.outputs.version }}
+          make_latest: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/release/softether-manager.tar.gz
+            dist/release/softether-manager.tar.gz.sha256
