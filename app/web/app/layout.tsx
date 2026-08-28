@@ -50,6 +50,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="SoftEther" />
+        {/* Relative hrefs for the same reason as the fonts: the panel may be
+            mounted under a secret prefix, and "./" resolves wherever it is. */}
+        <link rel="icon" type="image/png" sizes="256x256" href="./favicon.png" />
+        <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
         <style dangerouslySetInnerHTML={{ __html: fontFaces }} />
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>

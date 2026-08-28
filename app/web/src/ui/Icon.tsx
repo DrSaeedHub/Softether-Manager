@@ -362,8 +362,9 @@ export const IconGlobe = (p: P) => (
 export function BrandMark({ size = 32 }: { size?: number }) {
   return (
     <span className="brandmark" aria-hidden="true">
-      {/* The mark matches the deck: a lime coin, the hub-and-spokes pressed
-          into it in dark ink. */}
+      {/* The mark matches the deck: a lime coin with SoftEther's four-node
+          ring -- machines joined into one network -- pressed into it in dark
+          ink. The same figure as the app icon, drawn in the panel's theme. */}
       <svg width={size} height={size} viewBox="0 0 32 32" fill="none">
         <defs>
           <linearGradient id="bm-g" x1="4" y1="4" x2="28" y2="28" gradientUnits="userSpaceOnUse">
@@ -371,18 +372,20 @@ export function BrandMark({ size = 32 }: { size?: number }) {
             <stop offset="1" stopColor="var(--action-bg)" />
           </linearGradient>
         </defs>
-        <circle cx="16" cy="16" r="16" fill="url(#bm-g)" />
-        <circle cx="16" cy="16" r="4.2" stroke="var(--action-fg)" strokeWidth="2" />
-        <path
-          d="M16 6.2v5.2M16 20.6v5.2M6.2 16h5.2M20.6 16h5.2"
+        <rect width="32" height="32" rx="9.5" fill="url(#bm-g)" />
+        <rect
+          x="10.7"
+          y="10.7"
+          width="10.6"
+          height="10.6"
           stroke="var(--action-fg)"
           strokeWidth="2"
-          strokeLinecap="round"
+          strokeLinejoin="round"
         />
-        <circle cx="16" cy="6.2" r="1.5" fill="var(--action-fg)" />
-        <circle cx="16" cy="25.8" r="1.5" fill="var(--action-fg)" />
-        <circle cx="6.2" cy="16" r="1.5" fill="var(--action-fg)" />
-        <circle cx="25.8" cy="16" r="1.5" fill="var(--action-fg)" />
+        <circle cx="10.7" cy="10.7" r="2.8" fill="var(--action-fg)" />
+        <circle cx="21.3" cy="10.7" r="2.8" fill="var(--action-fg)" />
+        <circle cx="10.7" cy="21.3" r="2.8" fill="var(--action-fg)" />
+        <circle cx="21.3" cy="21.3" r="2.8" fill="var(--action-fg)" />
       </svg>
     </span>
   );
