@@ -41,11 +41,50 @@ export const METRIC_WORD: Record<QuotaMetric, string> = {
   upload: "upload",
 };
 
+/** A pair of raw or net byte counters, in the panel's own words. */
+export interface Bytes {
+  /** What the subject uploaded. */
+  send: number;
+  /** What the subject downloaded. */
+  recv: number;
+}
+
+/**
+ * The Transfer the panel shows: SoftEther's lifetime counter, less whatever a
+ * reset put behind us.
+ *
+ * SoftEther has no way to zero a counter, so a reset is a baseline this panel
+ * keeps and every figure subtracts. Passing the raw counters through here is
+ * what makes the Transfer column and the quota meter beside it the same
+ * number, computed from the same reading, rather than two figures a tick
+ * apart.
+ */
+export function netBytes(raw: Bytes, quota?: Quota | null): Bytes {
+  if (!quota) return raw;
+  return {
+    send: Math.max(0, raw.send - quota.base_send_bytes),
+    recv: Math.max(0, raw.recv - quota.base_recv_bytes),
+  };
+}
+
+/** The one of those figures a metric measures. */
+export function meteredBytes(net: Bytes, metric: QuotaMetric): number {
+  if (metric === "upload") return net.send;
+  if (metric === "download") return net.recv;
+  return net.send + net.recv;
+}
+
+/** How far into its ceiling a subject is, 0-100. */
+function percentOf(used: number, limitBytes: number): number {
+  if (limitBytes <= 0) return 0;
+  return Math.max(0, Math.min(100, (used / limitBytes) * 100));
+}
+
 /** Neutral until it is worth looking at, warning near the end, spent at it. */
-export function quotaTone(quota: Quota): "accent" | "warn" | "err" {
+export function quotaTone(quota: Quota, percent = quota.percent): "accent" | "warn" | "err" {
   if (!quota.enabled) return "accent";
-  if (quota.percent >= 100) return "err";
-  if (quota.percent >= 80) return "warn";
+  if (percent >= 100) return "err";
+  if (percent >= 80) return "warn";
   return "accent";
 }
 
@@ -56,8 +95,9 @@ const TONE_COLOR = {
 } as const;
 
 /** The bar itself — shared by the summary and by the table cell. */
-export function QuotaMeter({ quota }: { quota: Quota }) {
-  const percent = Math.max(0, Math.min(100, quota.percent));
+export function QuotaMeter({ quota, used }: { quota: Quota; used?: number }) {
+  const spent = used ?? quota.used_bytes;
+  const percent = percentOf(spent, quota.limit_bytes);
   return (
     <div
       className="meter"
@@ -65,11 +105,11 @@ export function QuotaMeter({ quota }: { quota: Quota }) {
       aria-valuenow={Math.round(percent)}
       aria-valuemin={0}
       aria-valuemax={100}
-      aria-label={`${formatBytes(quota.used_bytes)} of ${formatBytes(quota.limit_bytes)} used`}
+      aria-label={`${formatBytes(spent)} of ${formatBytes(quota.limit_bytes)} used`}
     >
       <div
         className="meter__fill"
-        style={{ width: `${percent}%`, background: TONE_COLOR[quotaTone(quota)] }}
+        style={{ width: `${percent}%`, background: TONE_COLOR[quotaTone(quota, percent)] }}
       />
     </div>
   );
@@ -85,7 +125,8 @@ export interface QuotaDraft {
   unit: QuotaUnit;
   metric: QuotaMetric;
   enforce: boolean;
-  /** Start a new cycle when this draft is saved. */
+  /** Zero the config's transfer when this draft is saved. Independent of the
+   *  ceiling: a transfer is worth resetting with or without one. */
   reset: boolean;
 }
 
@@ -98,9 +139,10 @@ export const EMPTY_DRAFT: QuotaDraft = {
   reset: false,
 };
 
-/** A saved quota, back in editable form. */
+/** A saved quota, back in editable form. A record with no ceiling — one that
+ *  exists only to remember a reset — edits as "no limit". */
 export function draftOf(quota: Quota | null): QuotaDraft {
-  if (!quota) return { ...EMPTY_DRAFT };
+  if (!quota || !quota.has_limit) return { ...EMPTY_DRAFT, on: false };
   return {
     on: true,
     limit: String(quota.limit),
@@ -123,8 +165,10 @@ export function draftAmount(draft: QuotaDraft): number {
 /**
  * Apply a draft to one config, as part of whatever save is in progress.
  *
- * Ordering matters: the ceiling is written before the counter is zeroed, so a
- * reset always lands on the limit the operator just chose.
+ * The ceiling first, the reset second, so a reset always lands on the limit
+ * the operator just chose. Removing a ceiling keeps the record if it still
+ * holds a baseline — that is the backend's call, and it is what lets a reset
+ * survive an operator who later decides against a limit.
  */
 export async function saveUserQuotaDraft(
   hub: string,
@@ -132,17 +176,19 @@ export async function saveUserQuotaDraft(
   draft: QuotaDraft,
   existed: boolean,
 ): Promise<void> {
-  if (!draft.on) {
-    if (existed) await api.deleteUserQuota(hub, name);
-    return;
+  if (draft.on) {
+    await api.setUserQuota(hub, name, {
+      limit: draftAmount(draft),
+      unit: draft.unit,
+      metric: draft.metric,
+      enabled: draft.enforce,
+    });
+  } else if (existed) {
+    await api.deleteUserQuota(hub, name);
   }
-  await api.setUserQuota(hub, name, {
-    limit: draftAmount(draft),
-    unit: draft.unit,
-    metric: draft.metric,
-    enabled: draft.enforce,
-  });
-  if (draft.reset) await api.resetUserQuota(hub, name);
+  // Creates the record when there is none: resetting a transfer never depends
+  // on a limit having been set first.
+  if (draft.reset) await api.resetUserTransfer(hub, name);
 }
 
 /** The amount, the unit and what they count. The rows every quota form shares. */
@@ -198,53 +244,69 @@ export function QuotaFields({
   );
 }
 
-/** Read-only: where the subject has got to, and what that has cost it. */
-export function QuotaSummary({ quota, subject }: { quota: Quota; subject: "hub" | "user" }) {
+/**
+ * Read-only: where the subject has got to, and what that has cost it.
+ *
+ * `net` overrides the cached figures with the counters the caller already
+ * holds, which is how this and the Transfer beside it agree to the byte.
+ */
+export function QuotaSummary({
+  quota,
+  subject,
+  net,
+}: {
+  quota: Quota;
+  subject: "hub" | "user";
+  net?: Bytes;
+}) {
+  const moved: Bytes = net ?? { send: quota.upload_bytes, recv: quota.download_bytes };
+  const used = meteredBytes(moved, quota.metric);
+  const percent = percentOf(used, quota.limit_bytes);
+  const left = quota.has_limit ? Math.max(0, quota.limit_bytes - used) : null;
   return (
     <div className="quota">
       <div className="quota__head">
-        <span className="quota__used mono">{formatBytes(quota.used_bytes)}</span>
+        <span className="quota__used mono">{formatBytes(used)}</span>
         <span className="quota__of micro">
-          of {formatBytes(quota.limit_bytes)} {METRIC_WORD[quota.metric]}
+          {quota.has_limit
+            ? `of ${formatBytes(quota.limit_bytes)} ${METRIC_WORD[quota.metric]}`
+            : "moved — no ceiling set"}
         </span>
         {/* Worst state first. "spent" without a block means the ceiling was
             crossed but the cut-off has not landed yet -- the tick is due, or it
             could not reach the server -- which is worth saying rather than
             showing the same pill as a block that took. */}
-        {quota.blocked ? (
+        {!quota.has_limit ? null : quota.blocked ? (
           <Pill kind="err" label={subject === "hub" ? "offline — over limit" : "cut off — over limit"} />
         ) : !quota.enabled ? (
           <Pill kind="idle" label="not enforced" />
-        ) : quota.percent >= 100 ? (
+        ) : percent >= 100 ? (
           <Pill kind="busy" label="spent — cutting off" />
-        ) : quota.percent >= 80 ? (
+        ) : percent >= 80 ? (
           <Pill kind="warn" label="nearly spent" />
         ) : (
           <Pill kind="ok" label="within limit" />
         )}
       </div>
-      <QuotaMeter quota={quota} />
+      {quota.has_limit && <QuotaMeter quota={quota} used={used} />}
       <div className="quota__facts">
-        <span className="chip"><i>↓ down</i>{formatBytes(quota.download_bytes)}</span>
-        <span className="chip"><i>↑ up</i>{formatBytes(quota.upload_bytes)}</span>
-        <span className="chip">
-          <i>left</i>
-          {quota.remaining_bytes == null ? "—" : formatBytes(quota.remaining_bytes)}
-        </span>
-        <span className="chip"><i>since</i>{formatDate(quota.cycle_start)}</span>
+        <span className="chip"><i>↓ down</i>{formatBytes(moved.recv)}</span>
+        <span className="chip"><i>↑ up</i>{formatBytes(moved.send)}</span>
+        {left != null && <span className="chip"><i>left</i>{formatBytes(left)}</span>}
+        <span className="chip"><i>counting since</i>{formatDate(quota.cycle_start)}</span>
       </div>
       {quota.blocked && (
         <div className="alert alert--warn">
           {subject === "hub" ? (
             <>
               This hub was taken offline when the limit was reached, and every session in it was
-              dropped. Raise the limit or reset the counter to bring it back — the panel puts it
+              dropped. Raise the limit or reset the transfer to bring it back — the panel puts it
               online again by itself.
             </>
           ) : (
             <>
               Access for this config was denied when the limit was reached, and its sessions were
-              cut. Raise the limit or reset the counter and the panel restores exactly the policy
+              cut. Raise the limit or reset the transfer and the panel restores exactly the policy
               it found.
             </>
           )}
@@ -266,14 +328,22 @@ export function UserQuotaBlock({
   quota,
   draft,
   onChange,
+  raw,
 }: {
-  /** What is stored today, or null when the config has no ceiling yet. */
+  /** The config's traffic record, or null when it has neither limit nor reset. */
   quota: Quota | null;
   draft: QuotaDraft;
   onChange: (next: QuotaDraft) => void;
+  /** The config's raw lifetime counters, when the caller has them. */
+  raw?: Bytes;
 }) {
   const set = (patch: Partial<QuotaDraft>) => onChange({ ...draft, ...patch });
-  const spent = quota ? quota.used_bytes > 0 : false;
+  const moved = raw
+    ? netBytes(raw, quota)
+    : quota
+      ? { send: quota.upload_bytes, recv: quota.download_bytes }
+      : null;
+  const transfer = moved ? moved.send + moved.recv : 0;
   return (
     <>
       <div className="tpl__group">Traffic limit</div>
@@ -282,30 +352,30 @@ export function UserQuotaBlock({
         onChange={(v) => set({ on: v })}
         label="Limit how much this config may move"
         hint={
-          quota
-            ? "Off, the ceiling and everything counted against it are removed when you save."
-            : "The panel counts what moves — from SoftEther's own counters, so it survives a restart — and denies access and cuts the sessions the moment the ceiling is reached."
+          moved
+            ? `Measured against the transfer the panel shows for this config — ${formatBytes(transfer)} right now — so a limit applies to what it has already used, not only to what it uses next.`
+            : "Measured against the transfer the panel shows for this config, so a limit applies to what it has already used, not only to what it uses next."
         }
       />
       {draft.on && (
         <>
-          {quota && <QuotaSummary quota={quota} subject="user" />}
+          {quota?.has_limit && <QuotaSummary quota={quota} subject="user" net={moved ?? undefined} />}
           <QuotaFields draft={draft} onChange={onChange} />
           <CheckRow
             checked={draft.enforce}
             onChange={(v) => set({ enforce: v })}
             label="Enforce this limit"
-            hint="Off, the counter keeps running and the meter keeps filling, but nothing is ever cut off — useful for watching what a config would use before committing to a ceiling."
+            hint="Off, the transfer still counts and the meter still fills, but nothing is ever cut off — useful for watching what a config would use before committing to a ceiling."
           />
-          {spent && (
-            <CheckRow
-              checked={draft.reset}
-              onChange={(v) => set({ reset: v })}
-              label="Reset the counter with this save"
-              hint="Starts a new cycle from zero. If the config is cut off by its limit, this is what lets it back on."
-            />
-          )}
         </>
+      )}
+      {transfer > 0 && (
+        <CheckRow
+          checked={draft.reset}
+          onChange={(v) => set({ reset: v })}
+          label={`Reset this config's transfer to zero (now ${formatBytes(transfer)})`}
+          hint="SoftEther counts forever and cannot be told to stop, so the panel keeps its own zero and every figure subtracts it. Saving with this ticked moves that zero to today: the Transfer column and any limit start again together."
+        />
       )}
       {!draft.on && quota?.blocked && (
         <div className="alert alert--warn">
@@ -343,23 +413,28 @@ export function useQuotaIndex(deps: unknown[] = []) {
 
 /** A row's place in its quota, for sorting: unlimited sorts below everything
  *  limited, so the configs with a ceiling group together. */
-export function quotaSortValue(quota: Quota | undefined): number {
-  return quota ? quota.percent : -1;
+export function quotaSortValue(quota: Quota | undefined, net?: Bytes): number {
+  if (!quota?.has_limit) return -1;
+  const moved = net ?? { send: quota.upload_bytes, recv: quota.download_bytes };
+  return percentOf(meteredBytes(moved, quota.metric), quota.limit_bytes);
 }
 
-/** Used / limit with a bar, for a table cell. */
-export function QuotaCell({ quota }: { quota: Quota | undefined }) {
-  if (!quota) return <span className="micro">—</span>;
+/** Used / limit with a bar, for a table cell. `net` is the row's own
+ *  Transfer, so the two columns can never disagree. */
+export function QuotaCell({ quota, net }: { quota: Quota | undefined; net?: Bytes }) {
+  if (!quota?.has_limit) return <span className="micro">—</span>;
+  const moved: Bytes = net ?? { send: quota.upload_bytes, recv: quota.download_bytes };
+  const used = meteredBytes(moved, quota.metric);
   return (
     <span
       className="qcell"
-      title={`${METRIC_WORD[quota.metric]} · ${formatBytes(quota.used_bytes)} of ${formatBytes(quota.limit_bytes)}`}
+      title={`${METRIC_WORD[quota.metric]} · ${formatBytes(used)} of ${formatBytes(quota.limit_bytes)}`}
     >
       <span className="qcell__t mono">
-        {formatBytes(quota.used_bytes)}
+        {formatBytes(used)}
         <span className="muted"> / {formatBytes(quota.limit_bytes)}</span>
       </span>
-      <QuotaMeter quota={quota} />
+      <QuotaMeter quota={quota} used={used} />
       {quota.blocked ? <Pill kind="err" label="over" /> : !quota.enabled ? <Pill kind="idle" label="off" /> : null}
     </span>
   );
@@ -435,9 +510,9 @@ export function QuotaCard({ hub, onChanged }: { hub: string; onChanged?: () => v
 
   const reset = () =>
     guard(async () => {
-      adopt(await api.resetHubQuota(hub));
+      adopt(await api.resetHubTransfer(hub));
       onChanged?.();
-    }, "Counter reset — a new cycle starts now.");
+    }, "Transfer reset — the hub counts from zero again.");
 
   const remove = () =>
     guard(async () => {
@@ -451,7 +526,7 @@ export function QuotaCard({ hub, onChanged }: { hub: string; onChanged?: () => v
 
   return (
     <div className="card" style={{ padding: "var(--s4)", maxWidth: 640 }}>
-      {quota ? (
+      {quota?.has_limit ? (
         <QuotaSummary quota={quota} subject="hub" />
       ) : (
         <p className="lede" style={{ marginBottom: "var(--s3)" }}>
@@ -463,7 +538,7 @@ export function QuotaCard({ hub, onChanged }: { hub: string; onChanged?: () => v
 
       <QuotaFields draft={draft} onChange={change} />
 
-      {quota && (
+      {quota?.has_limit && (
         <CheckRow
           checked={draft.enforce}
           onChange={(v) => change({ ...draft, enforce: v })}
@@ -473,18 +548,20 @@ export function QuotaCard({ hub, onChanged }: { hub: string; onChanged?: () => v
       )}
 
       <div style={{ display: "flex", gap: "var(--s2)", flexWrap: "wrap", marginTop: "var(--s3)" }}>
-        {(dirty || !quota) && (
+        {(dirty || !quota?.has_limit) && (
           <button className="btn btn--primary" onClick={() => void save()} disabled={saving}>
-            {saving && <span className="spin" />} {quota ? "Save limit" : "Set the limit"}
+            {saving && <span className="spin" />} {quota?.has_limit ? "Save limit" : "Set the limit"}
           </button>
         )}
-        {dirty && quota && <button className="btn" onClick={() => adopt(quota)}>Discard</button>}
+        {dirty && quota?.has_limit && <button className="btn" onClick={() => adopt(quota)}>Discard</button>}
         {quota && !dirty && (
           <>
-            <button className="btn" onClick={() => void reset()}>Reset counter</button>
-            <button className="btn btn--ghost" onClick={() => setRemoving(true)}>
-              <IconTrash size={14} /> Remove limit
-            </button>
+            <button className="btn" onClick={() => void reset()}>Reset transfer</button>
+            {quota.has_limit && (
+              <button className="btn btn--ghost" onClick={() => setRemoving(true)}>
+                <IconTrash size={14} /> Remove limit
+              </button>
+            )}
           </>
         )}
       </div>

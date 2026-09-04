@@ -5,25 +5,26 @@ Two kinds of subject, one mechanism. A quota says *how much* may move
 the amount and the unit the operator typed are the same number in bytes by
 the time they get here.
 
-**How usage is counted.** SoftEther keeps cumulative byte counters per hub and
-per user and no history at all. Everywhere else in the panel that is enough,
-because a chart only ever asks about a window and derives it from the sample
-table. A quota cannot work that way: it has to survive the retention window
-pruning the samples it was counting, and it has to survive the VPN server
-restarting and zeroing the counters mid-cycle. So a quota carries its own
-running total, advanced from the counters:
+**What "used" means.** Exactly what the panel's Transfer column says, and
+nothing else. SoftEther counts per hub and per user, cumulatively, from the
+moment the object was created, and offers no RPC to zero a counter -- so the
+figure the panel shows, and the figure a quota measures, are both
 
-    delta = current - last_seen      (or `current`, when the counter restarted)
+    transfer = raw counter - baseline
 
-``LastSendBytes``/``LastRecvBytes`` are the reading the totals were last
-advanced to, which makes :func:`absorb` idempotent -- feeding it the same
-reading twice adds nothing. That is what lets the traffic sampler donate the
-counters it already read for free, while the quota tick reads its own on a
-faster clock.
+with the baseline at zero until somebody resets it. A ceiling set on a config
+that has already moved 144 GB therefore starts at 144 GB, not at nothing: the
+operator set a ceiling on the number in front of them, and that is the number
+it applies to. :func:`reset_transfer` moves the baseline up to the current
+reading, which zeroes the panel's Transfer and the quota together, because
+they were never two figures to begin with.
+
+The raw reading is cached on the row (``LastSendBytes``/``LastRecvBytes``) so
+a list of quotas costs no RPCs; anything looking at *one* subject refreshes it
+first, and the enforcement tick refreshes everything it is watching.
 
 **Direction.** The panel's convention throughout: SoftEther's ``Recv`` is what
-the subject *downloaded*, its ``Send`` is what the subject *uploaded*. The
-usage charts are labelled that way, so the quota counts that way.
+the subject *downloaded*, its ``Send`` is what the subject *uploaded*.
 
 **What "over" does.** A user over quota has ``policy:Access`` denied and their
 live sessions cut; a hub over quota is taken offline. Both are SoftEther's own
@@ -60,7 +61,7 @@ UNITS: dict[str, int] = {
 #: Columns every read wants, in one place so the row shape is stated once.
 _COLUMNS = (
     '"TrafficQuotaID", "SubjectType", "HubName", "UserName", "UserKey", "LimitBytes", '
-    '"Metric", "IsEnabled", "UploadBytes", "DownloadBytes", "LastSendBytes", '
+    '"Metric", "IsEnabled", "BaseSendBytes", "BaseRecvBytes", "LastSendBytes", '
     '"LastRecvBytes", "CycleStartDate", "ExceededDate", "EnforcedDate", "RestoreState", '
     '"CreatedDate", "UpdatedDate"'
 )
@@ -102,11 +103,21 @@ def _key(name: str) -> str:
     return name.casefold()
 
 
-def used_bytes(row: dict[str, Any]) -> int:
-    """What this quota's metric says has been consumed."""
-    upload = int(row["UploadBytes"])
-    download = int(row["DownloadBytes"])
-    metric = str(row["Metric"])
+def net_bytes(row: dict[str, Any]) -> tuple[int, int]:
+    """(uploaded, downloaded) since the last reset -- the panel's Transfer.
+
+    Clamped at zero: a raw counter below its own baseline means SoftEther
+    started it over, and negative traffic is not a thing.
+    """
+    upload = max(0, int(row["LastSendBytes"]) - int(row["BaseSendBytes"]))
+    download = max(0, int(row["LastRecvBytes"]) - int(row["BaseRecvBytes"]))
+    # The clamp is belt and braces: :func:`observe` drops a baseline that the
+    # counter has fallen below, so this should never actually bite.
+    return upload, download
+
+
+def metered(upload: int, download: int, metric: str) -> int:
+    """The one of those figures the metric actually measures."""
     if metric == "upload":
         return upload
     if metric == "download":
@@ -114,22 +125,37 @@ def used_bytes(row: dict[str, Any]) -> int:
     return upload + download
 
 
+def used_bytes(row: dict[str, Any]) -> int:
+    """What this quota's metric says has been consumed."""
+    upload, download = net_bytes(row)
+    return metered(upload, download, str(row["Metric"]))
+
+
 def public(row: dict[str, Any]) -> dict[str, Any]:
     """One quota, in the shape the API and the UI speak."""
     limit = int(row["LimitBytes"])
-    used = used_bytes(row)
+    upload, download = net_bytes(row)
+    used = metered(upload, download, str(row["Metric"]))
     amount, unit = split_bytes(limit)
     return {
         "subject": str(row["SubjectType"]),
         "hub": str(row["HubName"]),
         "username": str(row["UserName"]),
+        # A row with no limit is a baseline and nothing else -- what a config
+        # whose transfer was reset, but which has no ceiling, looks like.
+        "has_limit": limit > 0,
         "limit_bytes": limit,
         "limit": amount,
         "unit": unit,
         "metric": str(row["Metric"]),
         "enabled": bool(row["IsEnabled"]),
-        "upload_bytes": int(row["UploadBytes"]),
-        "download_bytes": int(row["DownloadBytes"]),
+        "upload_bytes": upload,
+        "download_bytes": download,
+        # Where the last reset put the zero. The UI subtracts these from the
+        # counters it already has, so its Transfer column and this agree to
+        # the byte instead of to the last tick.
+        "base_send_bytes": int(row["BaseSendBytes"]),
+        "base_recv_bytes": int(row["BaseRecvBytes"]),
         "used_bytes": used,
         "remaining_bytes": max(0, limit - used) if limit > 0 else None,
         "percent": round(min(100.0, used / limit * 100), 2) if limit > 0 else 0.0,
@@ -186,9 +212,16 @@ def save(
     metric: str,
     enabled: bool = True,
 ) -> dict[str, Any]:
-    """Create or change a quota. Consumption is *kept* across a change: an
-    operator raising a ceiling is not resetting the meter, and the Reset
-    button exists for when they mean to."""
+    """Create or change a quota.
+
+    A new ceiling starts measuring what the subject has *already* moved --
+    the operator set it on the figure in front of them. Consumption is kept
+    across a change too: raising a ceiling is not resetting the meter, and
+    :func:`reset_transfer` exists for when they mean that.
+
+    ``limit_bytes`` of 0 stores a row with no ceiling at all, which is how a
+    transfer baseline exists on a subject nobody has limited.
+    """
     if subject not in SUBJECTS:
         raise QuotaError(f"Unknown subject {subject!r}.")
     if metric not in METRICS:
@@ -221,36 +254,64 @@ def save(
     return get(subject, hub, username)  # type: ignore[return-value]
 
 
-def reset(subject: str, hub: str, username: str = "") -> Optional[dict[str, Any]]:
-    """Start a new cycle: consumption back to zero, the block lifted.
+def reset_transfer(subject: str, hub: str, username: str = "") -> dict[str, Any]:
+    """Zero the subject's transfer: the baseline moves up to the counter.
 
-    The counter baseline is cleared too, so the next reading is taken as the
-    new starting point rather than counting the whole cycle again.
+    This is the panel's only way to reset a counter -- SoftEther has no RPC
+    for it -- and because the panel's Transfer column is measured the same
+    way, this zeroes what the operator sees as well as what the ceiling
+    measures. They were never two figures.
+
+    A subject with no record yet gets one, carrying no ceiling: a baseline is
+    worth keeping whether or not anything is limited.
     """
     row = _row(subject, hub, username)
     if row is None:
-        return None
-    release(row, "cycle reset by the operator")
+        save(subject, hub, username, 0, "total", True)
+        row = _row(subject, hub, username)
+        if row is None:  # pragma: no cover - the insert above just succeeded
+            raise QuotaError("The traffic record could not be created.")
+
+    # The freshest reading is the honest zero; the cached one is the fallback
+    # when the server cannot be reached, and still zeroes what the panel shows.
+    reading = _live_counters(subject, hub, username)
+    send, recv = reading if reading else (int(row["LastSendBytes"]), int(row["LastRecvBytes"]))
+
+    release(row, "transfer reset by the operator")
     get_db().execute(
-        'UPDATE "TrafficQuota" SET "UploadBytes" = 0, "DownloadBytes" = 0, '
-        '"LastSendBytes" = -1, "LastRecvBytes" = -1, "CycleStartDate" = :now, '
+        'UPDATE "TrafficQuota" SET "BaseSendBytes" = :send, "BaseRecvBytes" = :recv, '
+        '"LastSendBytes" = :send, "LastRecvBytes" = :recv, "CycleStartDate" = :now, '
         '"ExceededDate" = NULL, "UpdatedDate" = :now '
         'WHERE "TrafficQuotaID" = :id',
-        {"id": row["TrafficQuotaID"], "now": utc_now()},
+        {"id": row["TrafficQuotaID"], "send": send, "recv": recv, "now": utc_now()},
     )
-    return get(subject, hub, username)
+    return get(subject, hub, username)  # type: ignore[return-value]
 
 
 def delete(subject: str, hub: str, username: str = "") -> bool:
-    """Remove a quota -- lifting its block first, so deleting a ceiling never
-    leaves the subject cut off with nothing left to explain why."""
+    """Remove the ceiling, lifting its block first -- so taking a limit away
+    never leaves the subject cut off with nothing left to explain why.
+
+    The *record* survives if it still carries a baseline: somebody reset this
+    subject's transfer, and that zero is theirs to keep whether or not a
+    ceiling stands on top of it. With nothing left to remember, the row goes.
+    """
     row = _row(subject, hub, username)
     if row is None:
         return False
-    release(row, "quota removed by the operator")
-    get_db().execute(
-        'DELETE FROM "TrafficQuota" WHERE "TrafficQuotaID" = :id', {"id": row["TrafficQuotaID"]}
-    )
+    release(row, "limit removed by the operator")
+    keep = int(row["BaseSendBytes"]) > 0 or int(row["BaseRecvBytes"]) > 0
+    if keep:
+        get_db().execute(
+            'UPDATE "TrafficQuota" SET "LimitBytes" = 0, "ExceededDate" = NULL, '
+            '"UpdatedDate" = :now WHERE "TrafficQuotaID" = :id',
+            {"id": row["TrafficQuotaID"], "now": utc_now()},
+        )
+    else:
+        get_db().execute(
+            'DELETE FROM "TrafficQuota" WHERE "TrafficQuotaID" = :id',
+            {"id": row["TrafficQuotaID"]},
+        )
     return True
 
 
@@ -272,27 +333,15 @@ def forget_hub(hub: str) -> None:
 # --- counting ------------------------------------------------------------------
 
 
-def _advance(current: int, last: int) -> int:
-    """How much moved between two readings of a counter that only grows.
-
-    A first sighting establishes the baseline and contributes nothing -- the
-    counter was already at that value before this quota existed. A reading
-    *below* the last one means the VPN server restarted and started over, so
-    everything now on the counter is new.
-    """
-    if last < 0:
-        return 0
-    if current < last:
-        return max(0, current)
-    return current - last
-
-
-def absorb(readings: Iterable[dict[str, Any]]) -> int:
-    """Advance every quota that has a reading in this batch.
+def observe(readings: Iterable[dict[str, Any]]) -> int:
+    """Store the newest raw counters for every subject that has a record.
 
     Each reading is ``{"subject", "hub", "user", "send", "recv"}`` carrying
-    SoftEther's *cumulative* counters. Idempotent: the same reading twice
-    advances nothing the second time.
+    SoftEther's cumulative counters. A reading *below* the stored baseline can
+    only mean the counter started over -- the server was rebuilt, the account
+    recreated -- and a baseline then points at a total that no longer exists,
+    so it drops to zero. Everything now on the counter accumulated after the
+    reset, which is exactly what the transfer should say.
     """
     rows = _all_rows()
     if not rows:
@@ -303,9 +352,8 @@ def absorb(readings: Iterable[dict[str, Any]]) -> int:
     updates: list[dict[str, Any]] = []
     for reading in readings:
         subject = str(reading["subject"])
-        row = index.get(
-            (subject, str(reading["hub"]), _key(str(reading.get("user", "")) if subject == "user" else ""))
-        )
+        name = str(reading.get("user", "")) if subject == "user" else ""
+        row = index.get((subject, str(reading["hub"]), _key(name)))
         if row is None:
             continue
         send = max(0, int(reading.get("send", 0)))
@@ -313,24 +361,63 @@ def absorb(readings: Iterable[dict[str, Any]]) -> int:
         updates.append(
             {
                 "id": row["TrafficQuotaID"],
-                # Send is what the subject uploaded, Recv what it downloaded --
-                # the panel's convention everywhere a byte is named.
-                "up": _advance(send, int(row["LastSendBytes"])),
-                "down": _advance(recv, int(row["LastRecvBytes"])),
                 "send": send,
                 "recv": recv,
+                "base_send": 0 if send < int(row["BaseSendBytes"]) else int(row["BaseSendBytes"]),
+                "base_recv": 0 if recv < int(row["BaseRecvBytes"]) else int(row["BaseRecvBytes"]),
                 "now": now,
             }
         )
     if updates:
         get_db().execute_many(
-            'UPDATE "TrafficQuota" SET "UploadBytes" = "UploadBytes" + :up, '
-            '"DownloadBytes" = "DownloadBytes" + :down, "LastSendBytes" = :send, '
-            '"LastRecvBytes" = :recv, "UpdatedDate" = :now '
+            'UPDATE "TrafficQuota" SET "LastSendBytes" = :send, "LastRecvBytes" = :recv, '
+            '"BaseSendBytes" = :base_send, "BaseRecvBytes" = :base_recv, "UpdatedDate" = :now '
             'WHERE "TrafficQuotaID" = :id',
             updates,
         )
     return len(updates)
+
+
+def _live_counters(subject: str, hub: str, username: str = "") -> Optional[tuple[int, int]]:
+    """One subject's cumulative (send, recv), read now. ``None`` when it
+    cannot be asked -- the server is down, or the object is gone."""
+    from ..se import rpc
+
+    try:
+        if subject == "hub":
+            status = rpc("GetHubStatus", {"HubName_str": hub})
+            return (
+                int(status.get("Send.UnicastBytes_u64", 0))
+                + int(status.get("Send.BroadcastBytes_u64", 0)),
+                int(status.get("Recv.UnicastBytes_u64", 0))
+                + int(status.get("Recv.BroadcastBytes_u64", 0)),
+            )
+        found = rpc("GetUser", {"HubName_str": hub, "Name_str": username})
+        return (
+            int(found.get("Send.UnicastBytes_u64", 0))
+            + int(found.get("Send.BroadcastBytes_u64", 0)),
+            int(found.get("Recv.UnicastBytes_u64", 0))
+            + int(found.get("Recv.BroadcastBytes_u64", 0)),
+        )
+    except Exception as exc:  # noqa: BLE001 - a stale figure beats no answer
+        logger.debug("live counters unavailable for %s %s/%s: %s", subject, hub, username, exc)
+        return None
+
+
+def refresh(subject: str, hub: str, username: str = "") -> None:
+    """Bring one subject's cached reading up to date, if it has a record.
+
+    Anything looking at a single subject calls this first, so a detail view
+    and the Transfer figure beside it never disagree by a tick.
+    """
+    if _row(subject, hub, username) is None:
+        return
+    reading = _live_counters(subject, hub, username)
+    if reading is None:
+        return
+    observe([
+        {"subject": subject, "hub": hub, "user": username, "send": reading[0], "recv": reading[1]}
+    ])
 
 
 # --- enforcing -----------------------------------------------------------------
@@ -504,9 +591,9 @@ def enforce() -> list[dict[str, Any]]:
     return changed
 
 
-def absorb_and_enforce(readings: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+def observe_and_enforce(readings: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     """The whole cycle for a batch of counters someone else already read."""
-    absorb(readings)
+    observe(readings)
     return enforce()
 
 
@@ -568,8 +655,8 @@ def tick() -> dict[str, Any]:
 
     Separate from the traffic sampler because the two answer to different
     clocks: a chart is happy with a reading every few minutes, a ceiling
-    should not be a few minutes late. The sampler still donates its counters
-    (see :func:`absorb_and_enforce`), so the two never double-count.
+    should not be a few minutes late. The sampler still donates the counters
+    it has already read (see :func:`observe_and_enforce`).
     """
     from ..se import connection
     from ..settings_store import get_setting
@@ -588,5 +675,5 @@ def tick() -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 - an offline server is a gap, not a crash
         logger.debug("quota counters unavailable: %s", exc)
         return {"quotas": 0, "error": str(exc)}
-    changed = absorb_and_enforce(readings)
+    changed = observe_and_enforce(readings)
     return {"quotas": len(readings), "changed": changed}

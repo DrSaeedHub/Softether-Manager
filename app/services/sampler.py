@@ -204,9 +204,9 @@ def sample_traffic() -> dict[str, Any]:
                 user_rows,
             )
         _prune(db)
-        # The counters are already in hand and a quota's arithmetic is
-        # idempotent, so the ceilings get a free look at them -- the quota
-        # tick's own read is what covers the gap between these slower passes.
+        # The counters are already in hand, so the ceilings get a free look at
+        # them -- the quota tick's own read covers the gap between these
+        # slower passes.
         _feed_quotas(hub_rows, user_rows)
         return {"hubs": len(hub_rows), "users": len(user_rows)}
     except Exception as exc:  # noqa: BLE001 - an offline server is a gap, not a crash
@@ -229,7 +229,7 @@ def _feed_quotas(hub_rows: list[dict[str, Any]], user_rows: list[dict[str, Any]]
         for r in user_rows
     ]
     try:
-        quota.absorb_and_enforce(readings)
+        quota.observe_and_enforce(readings)
     except Exception:  # noqa: BLE001 - a ceiling failing must not lose the samples
         logger.exception("quota update from the traffic pass failed")
 

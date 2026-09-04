@@ -11,7 +11,14 @@ import {
   usePoll,
   useSort,
 } from "../components/bits";
-import { QuotaCell, quotaKey, quotaSortValue, useQuotaIndex } from "../components/QuotaCard";
+import {
+  QuotaCell,
+  meteredBytes,
+  netBytes,
+  quotaKey,
+  quotaSortValue,
+  useQuotaIndex,
+} from "../components/QuotaCard";
 import { UserSheet } from "../components/UserSheet";
 import { VpnFileSheet } from "../components/VpnFileSheet";
 import { api, type Wire } from "../lib/api";
@@ -37,6 +44,9 @@ export function AllUsers() {
   const { sort, toggle } = useSort();
   const quotaOf = (u: Wire) =>
     quotas.get(quotaKey("user", String(u.HubName_str), String(u.Name_str)));
+  // Transfer is the lifetime counter less whatever a reset put behind us, so
+  // the column and the meter next to it are the same number.
+  const movedBy = (u: Wire) => netBytes(userBytes(u), quotaOf(u));
 
   const load = useCallback(async () => {
     setData(await api.allUsers().catch(() => null));
@@ -55,9 +65,15 @@ export function AllUsers() {
         );
     // Sorting is applied after the poll refreshes the list, so a chosen order
     // survives every refresh rather than snapping back to the server's.
-    return sortRows(matched, sort, (u, key) =>
-      key === "quota" ? quotaSortValue(quotaOf(u)) : userSortValue(u, key),
-    );
+    return sortRows(matched, sort, (u, key) => {
+      if (key === "quota") return quotaSortValue(quotaOf(u), movedBy(u));
+      // Transfer sorts by what the panel shows, which a reset changes.
+      if (key === "transfer") {
+        const moved = movedBy(u);
+        return moved.send + moved.recv;
+      }
+      return userSortValue(u, key);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, query, sort, quotas]);
 
@@ -123,7 +139,7 @@ export function AllUsers() {
                   </thead>
                   <tbody>
                     {filtered.map((u) => {
-                      const bytes = userBytes(u);
+                      const bytes = movedBy(u);
                       const expires = u.Expires_dt ?? u.ExpireTime_dt;
                       return (
                         <tr key={`${u.HubName_str}/${u.Name_str}`} className="clickable" onClick={() => open(u)}>
@@ -138,7 +154,7 @@ export function AllUsers() {
                           <td className="tmono">{timeAgo(u.LastLoginTime_dt as string)}</td>
                           <td className="tmono">{formatCount(Number(u.NumLogin_u32))}</td>
                           <td className="tmono">{formatBytes(bytes.send + bytes.recv)}</td>
-                          <td><QuotaCell quota={quotaOf(u)} /></td>
+                          <td><QuotaCell quota={quotaOf(u)} net={bytes} /></td>
                           <td className="tmono">{isNever(expires as string) ? "never" : formatDate(expires as string)}</td>
                           <td className="tact">
                             <button
@@ -166,7 +182,7 @@ export function AllUsers() {
           {/* mobile cards */}
           <div className="rows only-mobile-b">
             {filtered.map((u) => {
-              const bytes = userBytes(u);
+              const bytes = movedBy(u);
               const quota = quotaOf(u);
               return (
                 <button key={`${u.HubName_str}/${u.Name_str}`} className="row" onClick={() => open(u)}>
@@ -180,10 +196,11 @@ export function AllUsers() {
                       <span className="chip"><i>group</i>{String(u.GroupName_str || "—")}</span>
                       <span className="chip"><i>data</i>{formatBytes(bytes.send + bytes.recv)}</span>
                       <span className="chip"><i>seen</i>{timeAgo(u.LastLoginTime_dt as string)}</span>
-                      {quota && (
+                      {quota?.has_limit && (
                         <span className={`chip${quota.blocked ? "" : " chip--brand"}`}>
                           <i>limit</i>
-                          {formatBytes(quota.used_bytes)} / {formatBytes(quota.limit_bytes)}
+                          {formatBytes(meteredBytes(bytes, quota.metric))} /{" "}
+                          {formatBytes(quota.limit_bytes)}
                         </span>
                       )}
                     </div>

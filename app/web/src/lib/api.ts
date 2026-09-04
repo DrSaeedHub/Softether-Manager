@@ -114,6 +114,8 @@ export interface Quota {
   subject: "hub" | "user";
   hub: string;
   username: string;
+  /** False for a record that carries only a reset baseline, with no ceiling. */
+  has_limit: boolean;
   limit_bytes: number;
   /** The same limit as the operator typed it: a number and a unit. */
   limit: number;
@@ -122,6 +124,10 @@ export interface Quota {
   enabled: boolean;
   upload_bytes: number;
   download_bytes: number;
+  /** Where the last reset put the zero. Subtracting these from the counters a
+   *  list already has is what keeps its Transfer column and its meter equal. */
+  base_send_bytes: number;
+  base_recv_bytes: number;
   /** Only what `metric` counts — this is what the limit is compared against. */
   used_bytes: number;
   remaining_bytes: number | null;
@@ -399,7 +405,7 @@ export const api = {
   setHubQuota: (hub: string, body: QuotaIn) =>
     request<Quota>("PUT", `/quotas/hub/${encodeURIComponent(hub)}`, body),
   deleteHubQuota: (hub: string) => request("DELETE", `/quotas/hub/${encodeURIComponent(hub)}`),
-  resetHubQuota: (hub: string) =>
+  resetHubTransfer: (hub: string) =>
     request<Quota>("POST", `/quotas/hub/${encodeURIComponent(hub)}/reset`),
   userQuota: (hub: string, name: string) =>
     request<Quota>("GET", `/quotas/user/${encodeURIComponent(hub)}/${encodeURIComponent(name)}`),
@@ -407,7 +413,7 @@ export const api = {
     request<Quota>("PUT", `/quotas/user/${encodeURIComponent(hub)}/${encodeURIComponent(name)}`, body),
   deleteUserQuota: (hub: string, name: string) =>
     request("DELETE", `/quotas/user/${encodeURIComponent(hub)}/${encodeURIComponent(name)}`),
-  resetUserQuota: (hub: string, name: string) =>
+  resetUserTransfer: (hub: string, name: string) =>
     request<Quota>("POST", `/quotas/user/${encodeURIComponent(hub)}/${encodeURIComponent(name)}/reset`),
 
   // -- the RPC console -----------------------------------------------------------------------------------

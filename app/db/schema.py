@@ -12,8 +12,8 @@ encrypted administrator password) live in ``Setting``. Traffic samples are
 **append-only**: the panel snapshots SoftEther's cumulative per-user and
 per-hub byte counters on a schedule and never updates a row; usage over a
 window is *derived* from the samples, exactly the way a ledger balance is
-derived. Traffic quotas are the one running total in the schema, and for a
-stated reason: see ``TrafficQuota`` below.
+derived. Traffic quotas measure the counters directly instead, against a
+baseline the panel can move: see ``TrafficQuota`` below.
 
 :func:`migrate` carries a database forward from the earlier multi-server
 layout: the first registered server's connection moves into the settings, and
@@ -112,15 +112,26 @@ TABLES: list[str] = [
         UNIQUE ("HubName", "UserName")
     )
     """,
-    # --- traffic quotas -----------------------------------------------------
-    # A byte ceiling on a Virtual Hub, or on one user's config. The consumed
-    # figures are a running total the sampler advances from SoftEther's
-    # cumulative counters, not a query over the samples: a quota has to
-    # survive both the retention window pruning old rows and the VPN server
-    # restarting its counters, and a balance carried forward does. Only
-    # "LastSendBytes"/"LastRecvBytes" -- the reading the totals were last
-    # advanced to -- make that arithmetic idempotent, so absorbing the same
-    # reading twice adds nothing.
+    # --- traffic quotas and the transfer baseline ---------------------------
+    # The panel's traffic record for one Virtual Hub, or for one user's
+    # config: what it has moved, and optionally the ceiling it may not pass.
+    #
+    # SoftEther counts per hub and per user and never stops -- there is no RPC
+    # to zero a counter -- so "how much has this moved" is the raw counter
+    # less a baseline this panel keeps:
+    #
+    #     transfer = LastSendBytes - BaseSendBytes   (and the same for Recv)
+    #
+    # "Last*" is the newest raw reading, cached so a list can be answered
+    # without an RPC per row; "Base*" is where the last reset put the zero,
+    # and 0 -- the default -- means the figure counts everything SoftEther
+    # has ever recorded. That is deliberately the *same* number the panel's
+    # Transfer column shows, so a limit is measured against the figure the
+    # operator is already looking at, and resetting one resets both.
+    #
+    # A row with "LimitBytes" = 0 carries a baseline and no ceiling: that is
+    # what a config whose transfer was reset but which has no limit looks
+    # like.
     #
     # "UserKey" is the case-folded name; SoftEther matches usernames without
     # case, so it is what the uniqueness and every lookup go through, while
@@ -135,10 +146,10 @@ TABLES: list[str] = [
         "LimitBytes"     INTEGER NOT NULL DEFAULT 0,
         "Metric"         TEXT    NOT NULL DEFAULT 'total',
         "IsEnabled"      INTEGER NOT NULL DEFAULT 1,
-        "UploadBytes"    INTEGER NOT NULL DEFAULT 0,
-        "DownloadBytes"  INTEGER NOT NULL DEFAULT 0,
-        "LastSendBytes"  INTEGER NOT NULL DEFAULT -1,
-        "LastRecvBytes"  INTEGER NOT NULL DEFAULT -1,
+        "BaseSendBytes"  INTEGER NOT NULL DEFAULT 0,
+        "BaseRecvBytes"  INTEGER NOT NULL DEFAULT 0,
+        "LastSendBytes"  INTEGER NOT NULL DEFAULT 0,
+        "LastRecvBytes"  INTEGER NOT NULL DEFAULT 0,
         "CycleStartDate" TEXT    NOT NULL,
         "ExceededDate"   TEXT,
         "EnforcedDate"   TEXT,
@@ -263,6 +274,32 @@ def migrate(conn) -> None:
         conn.execute(
             'ALTER TABLE "VpnSessionTrafficSample" ADD COLUMN "TotalBytes" INTEGER NOT NULL DEFAULT 0'
         )
+
+    # 1d. Traffic quotas first shipped counting only what moved *after* the
+    #     ceiling was set, which ignored everything the subject had already
+    #     used and disagreed with the panel's own Transfer column. They now
+    #     measure the raw counter less a baseline; a baseline of zero -- what
+    #     every existing row gets -- means "count it all", which is the
+    #     figure that column shows. The old running totals are dropped.
+    if table_exists("TrafficQuota"):
+        for column in ("BaseSendBytes", "BaseRecvBytes"):
+            if not has_column("TrafficQuota", column):
+                conn.execute(
+                    f'ALTER TABLE "TrafficQuota" ADD COLUMN "{column}" INTEGER NOT NULL DEFAULT 0'
+                )
+        # -1 was the old "no reading yet" sentinel; 0 is simply "nothing seen".
+        conn.execute(
+            'UPDATE "TrafficQuota" SET "LastSendBytes" = 0 WHERE "LastSendBytes" < 0'
+        )
+        conn.execute(
+            'UPDATE "TrafficQuota" SET "LastRecvBytes" = 0 WHERE "LastRecvBytes" < 0'
+        )
+        for column in ("UploadBytes", "DownloadBytes"):
+            if has_column("TrafficQuota", column):
+                try:
+                    conn.execute(f'ALTER TABLE "TrafficQuota" DROP COLUMN "{column}"')
+                except Exception:  # noqa: BLE001 - SQLite before 3.35 cannot drop a
+                    pass          # column; it defaults to 0 and nothing reads it.
 
     # 2. The sample tables are disposable time series; the old shape carried a
     #    ServerID column. Recreate rather than alter.

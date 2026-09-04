@@ -34,6 +34,16 @@ class QuotaIn(BaseModel):
     enabled: bool = True
 
 
+def _fresh(subject: str, hub: str, username: str = "") -> Optional[Wire]:
+    """One subject, with its counter read now rather than at the last tick.
+
+    A single subject is one cheap RPC, and it is what keeps a detail view
+    agreeing to the byte with the Transfer figure printed beside it.
+    """
+    quota.refresh(subject, hub, username)
+    return quota.get(subject, hub, username)
+
+
 def _settle(subject: str, hub: str, username: str = "") -> Optional[Wire]:
     """Re-evaluate after a change so the answer describes the world as it now
     is -- a raised ceiling lifts its block in the same request that raised it.
@@ -41,6 +51,7 @@ def _settle(subject: str, hub: str, username: str = "") -> Optional[Wire]:
     Enforcement talks to the VPN server, which may be down; that is the
     quota tick's problem to retry, never a reason to fail the save.
     """
+    quota.refresh(subject, hub, username)
     try:
         quota.enforce()
     except Exception:  # noqa: BLE001 - the tick retries
@@ -85,7 +96,7 @@ def list_quotas(user: dict = CurrentUser) -> list[Wire]:
 
 @router.get("/hub/{hub}")
 def get_hub_quota(hub: str, user: dict = CurrentUser) -> Wire:
-    found = quota.get("hub", hub)
+    found = _fresh("hub", hub)
     if found is None:
         raise _missing("hub")
     return found
@@ -105,11 +116,11 @@ def delete_hub_quota(hub: str, user: dict = CurrentUser) -> Wire:
 
 
 @router.post("/hub/{hub}/reset")
-def reset_hub_quota(hub: str, user: dict = CurrentUser) -> Wire:
-    out = quota.reset("hub", hub)
-    if out is None:
-        raise _missing("hub")
-    record(user, "quota.reset", "hub", hub, "")
+def reset_hub_transfer(hub: str, user: dict = CurrentUser) -> Wire:
+    """Zero the hub's transfer. Creates the record if the hub has none, so a
+    reset never depends on a ceiling having been set first."""
+    out = quota.reset_transfer("hub", hub)
+    record(user, "quota.transfer_reset", "hub", hub, "")
     return _settle("hub", hub) or out
 
 
@@ -118,7 +129,7 @@ def reset_hub_quota(hub: str, user: dict = CurrentUser) -> Wire:
 
 @router.get("/user/{hub}/{name}")
 def get_user_quota(hub: str, name: str, user: dict = CurrentUser) -> Wire:
-    found = quota.get("user", hub, name)
+    found = _fresh("user", hub, name)
     if found is None:
         raise _missing("config")
     return found
@@ -138,9 +149,10 @@ def delete_user_quota(hub: str, name: str, user: dict = CurrentUser) -> Wire:
 
 
 @router.post("/user/{hub}/{name}/reset")
-def reset_user_quota(hub: str, name: str, user: dict = CurrentUser) -> Wire:
-    out = quota.reset("user", hub, name)
-    if out is None:
-        raise _missing("config")
-    record(user, "quota.reset", "vpn_user", name, f"hub {hub}")
+def reset_user_transfer(hub: str, name: str, user: dict = CurrentUser) -> Wire:
+    """Zero the config's transfer -- the figure the panel shows and the figure
+    a ceiling measures, which are the same figure. Creates the record if the
+    config has none, so a reset never depends on a limit having been set."""
+    out = quota.reset_transfer("user", hub, name)
+    record(user, "quota.transfer_reset", "vpn_user", name, f"hub {hub}")
     return _settle("user", hub, name) or out

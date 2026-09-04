@@ -11,7 +11,14 @@ import {
   usePoll,
   useSort,
 } from "../../components/bits";
-import { QuotaCell, quotaKey, quotaSortValue, useQuotaIndex } from "../../components/QuotaCard";
+import {
+  QuotaCell,
+  meteredBytes,
+  netBytes,
+  quotaKey,
+  quotaSortValue,
+  useQuotaIndex,
+} from "../../components/QuotaCard";
 import { UserSheet } from "../../components/UserSheet";
 import { VpnFileSheet } from "../../components/VpnFileSheet";
 import { api, type Quota, type Wire } from "../../lib/api";
@@ -39,6 +46,9 @@ export function HubUsers({ hub }: { hub: string }) {
   const quotas = useQuotaIndex([hub]);
   const { sort, toggle } = useSort();
   const quotaOf = (u: Wire) => quotas.get(quotaKey("user", hub, String(u.Name_str)));
+  // Transfer is the lifetime counter less whatever a reset put behind us, so
+  // the column and the meter next to it are the same number.
+  const movedBy = (u: Wire) => netBytes(userBytes(u), quotaOf(u));
 
   const load = useCallback(async () => {
     const result = await api.users(hub).catch(() => null);
@@ -60,11 +70,16 @@ export function HubUsers({ hub }: { hub: string }) {
         );
     // Liveness comes from a separate call, so the status column sorts by the
     // same set the pill renders from rather than the stale Online_bool.
-    return sortRows(matched, sort, (u, key) =>
-      key === "quota"
-        ? quotaSortValue(quotas.get(quotaKey("user", hub, String(u.Name_str))))
-        : userSortValue(u, key, online.has(String(u.Name_str).toLowerCase())),
-    );
+    return sortRows(matched, sort, (u, key) => {
+      if (key === "quota") return quotaSortValue(quotaOf(u), movedBy(u));
+      // Transfer sorts by what the panel shows, which a reset changes.
+      if (key === "transfer") {
+        const moved = movedBy(u);
+        return moved.send + moved.recv;
+      }
+      return userSortValue(u, key, online.has(String(u.Name_str).toLowerCase()));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [users, query, sort, online, quotas, hub]);
 
   const open = (name: string) => navigate(`/hub/${seg(hub)}/user/${seg(name)}`);
@@ -129,6 +144,7 @@ export function HubUsers({ hub }: { hub: string }) {
                         key={String(u.Name_str)}
                         user={u}
                         quota={quotaOf(u)}
+                        moved={movedBy(u)}
                         online={online.has(String(u.Name_str).toLowerCase())}
                         onOpen={() => open(String(u.Name_str))}
                         onVpnFile={() => setVpnFor(String(u.Name_str))}
@@ -143,7 +159,7 @@ export function HubUsers({ hub }: { hub: string }) {
           {/* mobile cards */}
           <div className="rows only-mobile-b">
             {filtered.map((u) => {
-              const bytes = userBytes(u);
+              const bytes = movedBy(u);
               const quota = quotaOf(u);
               return (
                 <button key={String(u.Name_str)} className="row" onClick={() => open(String(u.Name_str))}>
@@ -157,10 +173,11 @@ export function HubUsers({ hub }: { hub: string }) {
                       <span className="chip"><i>auth</i>{AUTH_TYPES[Number(u.AuthType_u32)] ?? "?"}</span>
                       <span className="chip"><i>data</i>{formatBytes(bytes.send + bytes.recv)}</span>
                       <span className="chip"><i>seen</i>{timeAgo(u.LastLoginTime_dt as string)}</span>
-                      {quota && (
+                      {quota?.has_limit && (
                         <span className={`chip${quota.blocked ? "" : " chip--brand"}`}>
                           <i>limit</i>
-                          {formatBytes(quota.used_bytes)} / {formatBytes(quota.limit_bytes)}
+                          {formatBytes(meteredBytes(bytes, quota.metric))} /{" "}
+                          {formatBytes(quota.limit_bytes)}
                         </span>
                       )}
                     </div>
@@ -205,8 +222,8 @@ export function UserStatePill({ user, online }: { user: Wire; online?: boolean }
   return <Pill kind="idle" label="offline" />;
 }
 
-function UserRow({ user: u, quota, online, onOpen, onVpnFile }: { user: Wire; quota?: Quota; online: boolean; onOpen: () => void; onVpnFile: () => void }) {
-  const bytes = userBytes(u);
+function UserRow({ user: u, quota, moved, online, onOpen, onVpnFile }: { user: Wire; quota?: Quota; moved: { send: number; recv: number }; online: boolean; onOpen: () => void; onVpnFile: () => void }) {
+  const bytes = moved;
   const expires = u.Expires_dt ?? u.ExpireTime_dt;
   return (
     <tr className="clickable" onClick={onOpen}>
@@ -224,7 +241,7 @@ function UserRow({ user: u, quota, online, onOpen, onVpnFile }: { user: Wire; qu
       <td className="tmono" title={`↑ ${formatBytes(bytes.send)} · ↓ ${formatBytes(bytes.recv)}`}>
         {formatBytes(bytes.send + bytes.recv)}
       </td>
-      <td><QuotaCell quota={quota} /></td>
+      <td><QuotaCell quota={quota} net={moved} /></td>
       <td className="tmono">{isNever(expires as string) ? "never" : formatDate(expires as string)}</td>
       <td className="tact">
         <button

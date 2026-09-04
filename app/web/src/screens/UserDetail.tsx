@@ -13,7 +13,7 @@ import {
   useReveal,
 } from "../components/bits";
 import { PolicyEditor, extractPolicy } from "../components/PolicyEditor";
-import { QuotaSummary } from "../components/QuotaCard";
+import { QuotaSummary, netBytes } from "../components/QuotaCard";
 import { RangeSeg, TrafficChart } from "../components/TrafficChart";
 import { UserSheet } from "../components/UserSheet";
 import { VpnFileSheet } from "../components/VpnFileSheet";
@@ -204,7 +204,9 @@ export function UserDetail({ hub, name }: { hub: string; name: string }) {
     );
   }
 
-  const bytes = userBytes(user);
+  // What the panel calls this config's Transfer: SoftEther's lifetime counter
+  // less whatever a reset put behind us.
+  const bytes = netBytes(userBytes(user), quota);
 
   return (
     <div className="page">
@@ -266,7 +268,7 @@ export function UserDetail({ hub, name }: { hub: string; name: string }) {
         </div>
       </div>
 
-      {quota && (
+      {quota?.has_limit && (
         <>
           <SectionTitle
             actions={
@@ -276,7 +278,7 @@ export function UserDetail({ hub, name }: { hub: string; name: string }) {
             Traffic limit
           </SectionTitle>
           <div className="card" style={{ padding: "var(--s4)", maxWidth: 640 }}>
-            <QuotaSummary quota={quota} subject="user" />
+            <QuotaSummary quota={quota} subject="user" net={bytes} />
           </div>
         </>
       )}

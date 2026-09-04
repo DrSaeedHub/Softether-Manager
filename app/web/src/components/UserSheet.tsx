@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api, ApiError, type Quota, type Wire } from "../lib/api";
-import { AUTH_TYPE_OPTIONS, isNever } from "../lib/se";
+import { AUTH_TYPE_OPTIONS, isNever, userBytes } from "../lib/se";
 import { useToast } from "../lib/toast";
 import { fileToBase64 } from "../lib/util";
 import { Sheet } from "../ui/Sheet";
@@ -31,6 +31,11 @@ import {
  * of the same atomic save. The amount is validated *before* anything is sent,
  * so a typo cannot leave a user created with no limit; if the second write
  * fails anyway, the sheet stays open and says exactly what did land.
+ *
+ * Resetting the transfer rides the same write. SoftEther counts forever and
+ * has no RPC to zero a counter, so the panel keeps its own zero and every
+ * figure it shows subtracts it -- which is why this is a checkbox on the
+ * profile rather than a button that fires out of an unsaved form.
  */
 export function UserSheet({
   hub,
@@ -273,6 +278,7 @@ export function UserSheet({
         <UserQuotaBlock
           quota={quota}
           draft={quotaDraft}
+          raw={existing ? userBytes(existing) : undefined}
           onChange={(next) => {
             setQuotaDraft(next);
             setQuotaTouched(true);
