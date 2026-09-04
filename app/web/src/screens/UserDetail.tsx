@@ -13,6 +13,7 @@ import {
   useReveal,
 } from "../components/bits";
 import { PolicyEditor, extractPolicy } from "../components/PolicyEditor";
+import { QuotaCard } from "../components/QuotaCard";
 import { RangeSeg, TrafficChart } from "../components/TrafficChart";
 import { UserSheet } from "../components/UserSheet";
 import { VpnFileSheet } from "../components/VpnFileSheet";
@@ -345,6 +346,9 @@ export function UserDetail({ hub, name }: { hub: string; name: string }) {
           />
         </div>
       )}
+
+      <SectionTitle>Traffic limit</SectionTitle>
+      <QuotaCard subject="user" hub={hub} name={name} onChanged={load} />
 
       <SectionTitle>Security policy</SectionTitle>
       <div className="card" style={{ padding: "var(--s4)", maxWidth: 720 }}>

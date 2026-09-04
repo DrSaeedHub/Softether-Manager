@@ -104,6 +104,44 @@ export interface Usage {
   samples: number;
 }
 
+/** What a traffic quota counts. `total` is the two directions added up. */
+export type QuotaMetric = "total" | "download" | "upload";
+export type QuotaUnit = "MB" | "GB" | "TB";
+
+/** A byte ceiling on a hub or on one user's config, and how far into it the
+ *  subject has got this cycle. */
+export interface Quota {
+  subject: "hub" | "user";
+  hub: string;
+  username: string;
+  limit_bytes: number;
+  /** The same limit as the operator typed it: a number and a unit. */
+  limit: number;
+  unit: QuotaUnit;
+  metric: QuotaMetric;
+  enabled: boolean;
+  upload_bytes: number;
+  download_bytes: number;
+  /** Only what `metric` counts — this is what the limit is compared against. */
+  used_bytes: number;
+  remaining_bytes: number | null;
+  percent: number;
+  exceeded: boolean;
+  exceeded_date: string | null;
+  /** Whether the panel has actually cut the subject off. */
+  blocked: boolean;
+  blocked_date: string | null;
+  cycle_start: string;
+  updated_date: string;
+}
+
+export interface QuotaIn {
+  limit: number;
+  unit: QuotaUnit;
+  metric: QuotaMetric;
+  enabled: boolean;
+}
+
 const hubPath = (hub: string) => `/hubs/${encodeURIComponent(hub)}`;
 
 export const api = {
@@ -354,6 +392,23 @@ export const api = {
   deleteMac: (hub: string, key: number) => request("DELETE", `${hubPath(hub)}/mac-table/${key}`),
   ipTable: (hub: string) => request("GET", `${hubPath(hub)}/ip-table`),
   deleteIp: (hub: string, key: number) => request("DELETE", `${hubPath(hub)}/ip-table/${key}`),
+
+  // -- traffic quotas ----------------------------------------------------------------------
+  quotas: () => request<Quota[]>("GET", "/quotas"),
+  hubQuota: (hub: string) => request<Quota>("GET", `/quotas/hub/${encodeURIComponent(hub)}`),
+  setHubQuota: (hub: string, body: QuotaIn) =>
+    request<Quota>("PUT", `/quotas/hub/${encodeURIComponent(hub)}`, body),
+  deleteHubQuota: (hub: string) => request("DELETE", `/quotas/hub/${encodeURIComponent(hub)}`),
+  resetHubQuota: (hub: string) =>
+    request<Quota>("POST", `/quotas/hub/${encodeURIComponent(hub)}/reset`),
+  userQuota: (hub: string, name: string) =>
+    request<Quota>("GET", `/quotas/user/${encodeURIComponent(hub)}/${encodeURIComponent(name)}`),
+  setUserQuota: (hub: string, name: string, body: QuotaIn) =>
+    request<Quota>("PUT", `/quotas/user/${encodeURIComponent(hub)}/${encodeURIComponent(name)}`, body),
+  deleteUserQuota: (hub: string, name: string) =>
+    request("DELETE", `/quotas/user/${encodeURIComponent(hub)}/${encodeURIComponent(name)}`),
+  resetUserQuota: (hub: string, name: string) =>
+    request<Quota>("POST", `/quotas/user/${encodeURIComponent(hub)}/${encodeURIComponent(name)}/reset`),
 
   // -- the RPC console -----------------------------------------------------------------------------------
   rpcMethods: () => request<Wire[]>("GET", "/rpc/methods"),

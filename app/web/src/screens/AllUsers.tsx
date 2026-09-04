@@ -11,6 +11,7 @@ import {
   usePoll,
   useSort,
 } from "../components/bits";
+import { QuotaCell, quotaKey, quotaSortValue, useQuotaIndex } from "../components/QuotaCard";
 import { UserSheet } from "../components/UserSheet";
 import { VpnFileSheet } from "../components/VpnFileSheet";
 import { api, type Wire } from "../lib/api";
@@ -32,7 +33,10 @@ export function AllUsers() {
   const [creating, setCreating] = useState(false);
   const [createHub, setCreateHub] = useState("");
   const [vpnFor, setVpnFor] = useState<{ hub: string; name: string } | null>(null);
+  const quotas = useQuotaIndex([]);
   const { sort, toggle } = useSort();
+  const quotaOf = (u: Wire) =>
+    quotas.get(quotaKey("user", String(u.HubName_str), String(u.Name_str)));
 
   const load = useCallback(async () => {
     setData(await api.allUsers().catch(() => null));
@@ -51,8 +55,11 @@ export function AllUsers() {
         );
     // Sorting is applied after the poll refreshes the list, so a chosen order
     // survives every refresh rather than snapping back to the server's.
-    return sortRows(matched, sort, (u, key) => userSortValue(u, key));
-  }, [data, query, sort]);
+    return sortRows(matched, sort, (u, key) =>
+      key === "quota" ? quotaSortValue(quotaOf(u)) : userSortValue(u, key),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, query, sort, quotas]);
 
   const open = (u: Wire) => navigate(`/hub/${seg(String(u.HubName_str))}/user/${seg(String(u.Name_str))}`);
 
@@ -109,6 +116,7 @@ export function AllUsers() {
                       <SortTh sortKey="login" sort={sort} onSort={toggle}>Last login</SortTh>
                       <SortTh sortKey="logins" sort={sort} onSort={toggle} style={{ width: 90 }}>Logins</SortTh>
                       <SortTh sortKey="transfer" sort={sort} onSort={toggle}>Transfer</SortTh>
+                      <SortTh sortKey="quota" sort={sort} onSort={toggle}>Limit</SortTh>
                       <SortTh sortKey="expires" sort={sort} onSort={toggle}>Expires</SortTh>
                       <th className="tact" style={{ width: 96 }} aria-label="Actions" />
                     </tr>
@@ -130,6 +138,7 @@ export function AllUsers() {
                           <td className="tmono">{timeAgo(u.LastLoginTime_dt as string)}</td>
                           <td className="tmono">{formatCount(Number(u.NumLogin_u32))}</td>
                           <td className="tmono">{formatBytes(bytes.send + bytes.recv)}</td>
+                          <td><QuotaCell quota={quotaOf(u)} /></td>
                           <td className="tmono">{isNever(expires as string) ? "never" : formatDate(expires as string)}</td>
                           <td className="tact">
                             <button
@@ -158,6 +167,7 @@ export function AllUsers() {
           <div className="rows only-mobile-b">
             {filtered.map((u) => {
               const bytes = userBytes(u);
+              const quota = quotaOf(u);
               return (
                 <button key={`${u.HubName_str}/${u.Name_str}`} className="row" onClick={() => open(u)}>
                   <div className="row__main">
@@ -170,6 +180,12 @@ export function AllUsers() {
                       <span className="chip"><i>group</i>{String(u.GroupName_str || "—")}</span>
                       <span className="chip"><i>data</i>{formatBytes(bytes.send + bytes.recv)}</span>
                       <span className="chip"><i>seen</i>{timeAgo(u.LastLoginTime_dt as string)}</span>
+                      {quota && (
+                        <span className={`chip${quota.blocked ? "" : " chip--brand"}`}>
+                          <i>limit</i>
+                          {formatBytes(quota.used_bytes)} / {formatBytes(quota.limit_bytes)}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="row__side">

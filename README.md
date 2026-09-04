@@ -24,6 +24,7 @@ live:
 | | |
 | --- | --- |
 | **Users** | create, edit, delete; password / certificate / signed / RADIUS / NT auth; group membership; expiry; per-user security policy (all forty knobs, grouped and explained); lifetime transfer counters; usage charts; live sessions with a kill switch; a one-click **.vpn connection file** download (optionally with the credential embedded, hashed the way the client stores it) — plus one **Users** page listing everyone across every hub, sortable by any column and searchable by name, hub, group or note |
+| **Traffic limits** | a byte ceiling per config *and* per hub, counting download only, upload only, or both, in MB / GB / TB — reached, the panel denies the config's access and cuts its sessions (or takes the hub offline), and restores exactly what it found when the limit is raised or the counter reset |
 | **Groups** | create, edit, delete; group-wide security policy that members inherit |
 | **Sessions** | live table with client address, protocol, cipher and transfer; per-session detail with the session's own traffic curve; disconnect; and a session log that outlives the connection, so "who was on last night, from where, moving what" is still answerable in the morning |
 | **Access control** | the packet filter (priority, protocol, addresses, ports, users, delay/jitter/loss simulation) and the source-IP limit list |
@@ -47,6 +48,15 @@ its own clock and its own switch in Settings, so a small box can keep the cheap 
 turn the expensive ones off.
 
 ![User detail](docs/screenshots/user.png)
+
+**Stops what has had enough.** Any config, and any hub, can carry a traffic ceiling: an
+amount in MB, GB or TB, counting the download, the upload, or the two together. The
+panel keeps its own running total, advanced from SoftEther's counters rather than
+queried out of the samples, so a limit survives both the retention window pruning old
+rows and the VPN server restarting and zeroing its counters. At the ceiling the config
+is denied access and its sessions are cut — the hub is taken offline — and the moment
+the limit is raised or the counter reset, exactly the policy the panel found is put
+back. The user tables carry the meter so a full one is visible without opening anything.
 
 More rooms of the house — every user across every hub, who is connected right now, one
 Virtual Hub's home, and the whole thing in its light theme:

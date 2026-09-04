@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { CheckRow, ConfirmSheet, Empty, ErrorAlert, Field, LoadingBlock, SectionTitle, usePoll } from "../../components/bits";
+import { QuotaCard } from "../../components/QuotaCard";
 import { api, type Wire } from "../../lib/api";
 import { navigate } from "../../lib/router";
 import { HUB_TYPES } from "../../lib/se";
@@ -18,11 +19,23 @@ export function HubSettings({ hub, onChanged }: { hub: string; onChanged: () => 
   return (
     <>
       <BasicsCard hub={hub} onChanged={onChanged} />
+      <QuotaSection hub={hub} onChanged={onChanged} />
       <LogCard hub={hub} />
       <MessageCard hub={hub} />
       <OptionsCard hub={hub} kind="admin" />
       <OptionsCard hub={hub} kind="ext" />
       <DangerCard hub={hub} />
+    </>
+  );
+}
+
+/** The hub's traffic ceiling. Reached, the hub goes offline -- which is a
+ *  change to the header's online pill, so the page is told to re-read. */
+function QuotaSection({ hub, onChanged }: { hub: string; onChanged: () => void }) {
+  return (
+    <>
+      <SectionTitle>Traffic limit</SectionTitle>
+      <QuotaCard subject="hub" hub={hub} onChanged={onChanged} />
     </>
   );
 }

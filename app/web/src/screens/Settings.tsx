@@ -445,6 +445,8 @@ function MonitoringCard() {
           session_interval_seconds: num("session_interval_seconds", 60),
           session_traffic_enabled: on("session_traffic_enabled"),
           session_history_retention_days: num("session_history_retention_days", 30),
+          quota_enforcement_enabled: on("quota_enforcement_enabled"),
+          quota_interval_seconds: num("quota_interval_seconds", 60),
           ui_live_seconds: num("ui_live_seconds", 5),
           ui_detail_seconds: num("ui_detail_seconds", 15),
           ui_list_seconds: num("ui_list_seconds", 30),
@@ -538,6 +540,19 @@ function MonitoringCard() {
               {numberField("Keep session history (days)", "session_history_retention_days", 30, 1, 3650, "Applies to the logins and their traffic series alike.")}
             </div>
           </>
+        )}
+
+        <div className="tpl__group">Traffic limits</div>
+        <CheckRow
+          checked={on("quota_enforcement_enabled")}
+          onChange={(v) => set("quota_enforcement_enabled", v)}
+          label="Enforce hub and config traffic limits"
+          hint="Counts what each limited hub and config moves and cuts it off at its ceiling. Costs nothing while no limit is set; while some are, one RPC per limited hub per tick."
+        />
+        {on("quota_enforcement_enabled") && (
+          <div className="row2">
+            {numberField("Check every (seconds)", "quota_interval_seconds", 60, 10, 3600, "How late a ceiling can bite. Traffic that moves between two checks is still counted — it is only the cut-off that waits.")}
+          </div>
         )}
 
         <div className="tpl__group">Page refresh</div>

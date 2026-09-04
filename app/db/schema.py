@@ -12,7 +12,8 @@ encrypted administrator password) live in ``Setting``. Traffic samples are
 **append-only**: the panel snapshots SoftEther's cumulative per-user and
 per-hub byte counters on a schedule and never updates a row; usage over a
 window is *derived* from the samples, exactly the way a ledger balance is
-derived.
+derived. Traffic quotas are the one running total in the schema, and for a
+stated reason: see ``TrafficQuota`` below.
 
 :func:`migrate` carries a database forward from the earlier multi-server
 layout: the first registered server's connection moves into the settings, and
@@ -111,6 +112,42 @@ TABLES: list[str] = [
         UNIQUE ("HubName", "UserName")
     )
     """,
+    # --- traffic quotas -----------------------------------------------------
+    # A byte ceiling on a Virtual Hub, or on one user's config. The consumed
+    # figures are a running total the sampler advances from SoftEther's
+    # cumulative counters, not a query over the samples: a quota has to
+    # survive both the retention window pruning old rows and the VPN server
+    # restarting its counters, and a balance carried forward does. Only
+    # "LastSendBytes"/"LastRecvBytes" -- the reading the totals were last
+    # advanced to -- make that arithmetic idempotent, so absorbing the same
+    # reading twice adds nothing.
+    #
+    # "UserKey" is the case-folded name; SoftEther matches usernames without
+    # case, so it is what the uniqueness and every lookup go through, while
+    # "UserName" keeps the spelling the operator typed.
+    """
+    CREATE TABLE IF NOT EXISTS "TrafficQuota" (
+        "TrafficQuotaID" INTEGER PRIMARY KEY AUTOINCREMENT,
+        "SubjectType"    TEXT    NOT NULL,
+        "HubName"        TEXT    NOT NULL,
+        "UserName"       TEXT    NOT NULL DEFAULT '',
+        "UserKey"        TEXT    NOT NULL DEFAULT '',
+        "LimitBytes"     INTEGER NOT NULL DEFAULT 0,
+        "Metric"         TEXT    NOT NULL DEFAULT 'total',
+        "IsEnabled"      INTEGER NOT NULL DEFAULT 1,
+        "UploadBytes"    INTEGER NOT NULL DEFAULT 0,
+        "DownloadBytes"  INTEGER NOT NULL DEFAULT 0,
+        "LastSendBytes"  INTEGER NOT NULL DEFAULT -1,
+        "LastRecvBytes"  INTEGER NOT NULL DEFAULT -1,
+        "CycleStartDate" TEXT    NOT NULL,
+        "ExceededDate"   TEXT,
+        "EnforcedDate"   TEXT,
+        "RestoreState"   TEXT    NOT NULL DEFAULT '',
+        "CreatedDate"    TEXT    NOT NULL,
+        "UpdatedDate"    TEXT    NOT NULL,
+        UNIQUE ("SubjectType", "HubName", "UserKey")
+    )
+    """,
     # --- panel settings and audit ---------------------------------------------
     """
     CREATE TABLE IF NOT EXISTS "Setting" (
@@ -152,6 +189,8 @@ INDEXES: list[str] = [
     'ON "VpnSessionTrafficSample"("VpnSessionSampleID", "SampledDate")',
     'CREATE INDEX IF NOT EXISTS "IX_VpnSessionTrafficSample_Date" '
     'ON "VpnSessionTrafficSample"("SampledDate")',
+    'CREATE INDEX IF NOT EXISTS "IX_TrafficQuota_Hub" '
+    'ON "TrafficQuota"("HubName", "SubjectType")',
 ]
 
 SEEDS: list[tuple[str, list[dict]]] = []

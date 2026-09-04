@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import APP_ROOT, settings
 from .db import get_db
-from .routers import auth, connection, se_hub, se_rpc, se_server, system, users
+from .routers import auth, connection, quota, se_hub, se_rpc, se_server, system, users
 from .services import sampler
 from .services.resources import sampler as resource_sampler
 from .version import get_version
@@ -66,6 +66,7 @@ def _build_core() -> FastAPI:
         se_server.router,
         se_hub.router,
         users.router,
+        quota.router,
         se_rpc.router,
     ):
         app.include_router(router, prefix="/api/v1")

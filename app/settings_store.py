@@ -45,6 +45,12 @@ DEFAULTS: dict[str, Any] = {
     # kept before pruning -- separate from the traffic-chart retention above,
     # since a security log and a usage graph are kept for different reasons.
     "session_history_retention_days": None,
+    # Traffic quotas: whether the ceilings on hubs and configs are acted on,
+    # and how often. This tick is what cuts a subject off, so it runs on its
+    # own (seconds) clock rather than the traffic sampler's minutes -- and
+    # costs nothing at all while no quota exists.
+    "quota_enforcement_enabled": None,
+    "quota_interval_seconds": None,
     "update_check_enabled": None,
     "update_check_interval_hours": None,
     # The managed SoftEther server: this machine's own instance. The password
@@ -78,6 +84,8 @@ def _seed(key: str) -> Any:
         "ui_detail_seconds": 15,
         "ui_list_seconds": 30,
         "session_history_retention_days": 30,
+        "quota_enforcement_enabled": True,
+        "quota_interval_seconds": 60,
         "update_check_enabled": settings.update_check_enabled,
         "update_check_interval_hours": settings.update_check_interval_hours,
         "se_host": "127.0.0.1",

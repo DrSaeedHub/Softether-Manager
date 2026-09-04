@@ -11,9 +11,10 @@ import {
   usePoll,
   useSort,
 } from "../../components/bits";
+import { QuotaCell, quotaKey, quotaSortValue, useQuotaIndex } from "../../components/QuotaCard";
 import { UserSheet } from "../../components/UserSheet";
 import { VpnFileSheet } from "../../components/VpnFileSheet";
-import { api, type Wire } from "../../lib/api";
+import { api, type Quota, type Wire } from "../../lib/api";
 import { navigate, seg } from "../../lib/router";
 import { AUTH_TYPES, isNever, userBytes, userSortValue } from "../../lib/se";
 import { formatBytes, formatCount, formatDate, timeAgo } from "../../lib/util";
@@ -35,7 +36,9 @@ export function HubUsers({ hub }: { hub: string }) {
   const [vpnFor, setVpnFor] = useState<string | null>(null);
   // Case-folded, because SoftEther matches usernames without case.
   const [online, setOnline] = useState<Set<string>>(new Set());
+  const quotas = useQuotaIndex([hub]);
   const { sort, toggle } = useSort();
+  const quotaOf = (u: Wire) => quotas.get(quotaKey("user", hub, String(u.Name_str)));
 
   const load = useCallback(async () => {
     const result = await api.users(hub).catch(() => null);
@@ -58,9 +61,11 @@ export function HubUsers({ hub }: { hub: string }) {
     // Liveness comes from a separate call, so the status column sorts by the
     // same set the pill renders from rather than the stale Online_bool.
     return sortRows(matched, sort, (u, key) =>
-      userSortValue(u, key, online.has(String(u.Name_str).toLowerCase())),
+      key === "quota"
+        ? quotaSortValue(quotas.get(quotaKey("user", hub, String(u.Name_str))))
+        : userSortValue(u, key, online.has(String(u.Name_str).toLowerCase())),
     );
-  }, [users, query, sort, online]);
+  }, [users, query, sort, online, quotas, hub]);
 
   const open = (name: string) => navigate(`/hub/${seg(hub)}/user/${seg(name)}`);
 
@@ -113,6 +118,7 @@ export function HubUsers({ hub }: { hub: string }) {
                       <SortTh sortKey="login" sort={sort} onSort={toggle}>Last login</SortTh>
                       <SortTh sortKey="logins" sort={sort} onSort={toggle} style={{ width: 90 }}>Logins</SortTh>
                       <SortTh sortKey="transfer" sort={sort} onSort={toggle}>Transfer</SortTh>
+                      <SortTh sortKey="quota" sort={sort} onSort={toggle}>Limit</SortTh>
                       <SortTh sortKey="expires" sort={sort} onSort={toggle}>Expires</SortTh>
                       <th className="tact" style={{ width: 96 }} aria-label="Actions" />
                     </tr>
@@ -122,6 +128,7 @@ export function HubUsers({ hub }: { hub: string }) {
                       <UserRow
                         key={String(u.Name_str)}
                         user={u}
+                        quota={quotaOf(u)}
                         online={online.has(String(u.Name_str).toLowerCase())}
                         onOpen={() => open(String(u.Name_str))}
                         onVpnFile={() => setVpnFor(String(u.Name_str))}
@@ -137,6 +144,7 @@ export function HubUsers({ hub }: { hub: string }) {
           <div className="rows only-mobile-b">
             {filtered.map((u) => {
               const bytes = userBytes(u);
+              const quota = quotaOf(u);
               return (
                 <button key={String(u.Name_str)} className="row" onClick={() => open(String(u.Name_str))}>
                   <div className="row__main">
@@ -149,6 +157,12 @@ export function HubUsers({ hub }: { hub: string }) {
                       <span className="chip"><i>auth</i>{AUTH_TYPES[Number(u.AuthType_u32)] ?? "?"}</span>
                       <span className="chip"><i>data</i>{formatBytes(bytes.send + bytes.recv)}</span>
                       <span className="chip"><i>seen</i>{timeAgo(u.LastLoginTime_dt as string)}</span>
+                      {quota && (
+                        <span className={`chip${quota.blocked ? "" : " chip--brand"}`}>
+                          <i>limit</i>
+                          {formatBytes(quota.used_bytes)} / {formatBytes(quota.limit_bytes)}
+                        </span>
+                      )}
                     </div>
                     {u.Note_utf ? <div className="row__note truncate">{String(u.Note_utf)}</div> : null}
                   </div>
@@ -191,7 +205,7 @@ export function UserStatePill({ user, online }: { user: Wire; online?: boolean }
   return <Pill kind="idle" label="offline" />;
 }
 
-function UserRow({ user: u, online, onOpen, onVpnFile }: { user: Wire; online: boolean; onOpen: () => void; onVpnFile: () => void }) {
+function UserRow({ user: u, quota, online, onOpen, onVpnFile }: { user: Wire; quota?: Quota; online: boolean; onOpen: () => void; onVpnFile: () => void }) {
   const bytes = userBytes(u);
   const expires = u.Expires_dt ?? u.ExpireTime_dt;
   return (
@@ -210,6 +224,7 @@ function UserRow({ user: u, online, onOpen, onVpnFile }: { user: Wire; online: b
       <td className="tmono" title={`↑ ${formatBytes(bytes.send)} · ↓ ${formatBytes(bytes.recv)}`}>
         {formatBytes(bytes.send + bytes.recv)}
       </td>
+      <td><QuotaCell quota={quota} /></td>
       <td className="tmono">{isNever(expires as string) ? "never" : formatDate(expires as string)}</td>
       <td className="tact">
         <button

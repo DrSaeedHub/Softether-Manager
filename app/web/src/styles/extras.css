@@ -900,3 +900,61 @@
     gap: 2px;
   }
 }
+
+/* ── traffic quota ────────────────────────────────────────────────────────── */
+/* The ceiling on a hub or a config: the figure first, the bar under it, the
+   two directions that made it as chips. Same groove-and-fill meter the
+   resource cards use, so "how full is this" reads the same everywhere. */
+.quota {
+  display: grid;
+  gap: var(--s3);
+  margin-bottom: var(--s4);
+}
+.quota__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  flex-wrap: wrap;
+}
+.quota__used {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: var(--text);
+}
+.quota__of {
+  flex: 1;
+  min-width: 0;
+}
+.quota__head .pill {
+  align-self: center;
+}
+.quota__facts {
+  display: flex;
+  gap: var(--s2);
+  flex-wrap: wrap;
+}
+/* amount and unit are one control split in two */
+.qsplit {
+  display: grid;
+  grid-template-columns: 1fr 88px;
+  gap: var(--s2);
+}
+/* the table-cell form: figure, bar, and a pill only when something is wrong */
+.qcell {
+  display: inline-grid;
+  gap: 4px;
+  min-width: 116px;
+  max-width: 180px;
+}
+.qcell__t {
+  font-size: var(--t-micro);
+  white-space: nowrap;
+}
+.qcell .meter {
+  flex: none;
+}
+.qcell .pill {
+  justify-self: start;
+}

@@ -53,6 +53,10 @@ def set_hub(hub: str, body: Wire = Body(...), user: dict = CurrentUser) -> Wire:
 @router.delete("/{hub}")
 def delete_hub(hub: str, user: dict = CurrentUser) -> Wire:
     out = rpc("DeleteHub", {"HubName_str": hub})
+    from ..services.quota import forget_hub
+
+    # The hub's own ceiling and every config ceiling inside it went with it.
+    forget_hub(hub)
     record(user, "hub.deleted", "hub", hub, "")
     return out
 
@@ -192,8 +196,10 @@ def set_user(hub: str, name: str, body: Wire = Body(...), user: dict = CurrentUs
 def delete_user(hub: str, name: str, user: dict = CurrentUser) -> Wire:
     out = rpc("DeleteUser", {"HubName_str": hub, "Name_str": name})
     from ..credentials import delete_credential
+    from ..services.quota import forget_user
 
     delete_credential(hub, name)
+    forget_user(hub, name)
     record(user, "user.deleted", "vpn_user", name, f"hub {hub}")
     return out
 

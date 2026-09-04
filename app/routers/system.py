@@ -100,6 +100,8 @@ class SettingsIn(BaseModel):
     session_interval_seconds: Optional[int] = Field(default=None, ge=5, le=3600)
     session_traffic_enabled: Optional[bool] = None
     session_history_retention_days: Optional[int] = Field(default=None, ge=1, le=3650)
+    quota_enforcement_enabled: Optional[bool] = None
+    quota_interval_seconds: Optional[int] = Field(default=None, ge=10, le=3600)
     ui_live_seconds: Optional[int] = Field(default=None, ge=1, le=3600)
     ui_detail_seconds: Optional[int] = Field(default=None, ge=1, le=3600)
     ui_list_seconds: Optional[int] = Field(default=None, ge=1, le=3600)

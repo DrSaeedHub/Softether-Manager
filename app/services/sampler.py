@@ -7,6 +7,10 @@ tables, and every chart is derived from the deltas between snapshots.
 
 An unconfigured or unreachable server simply contributes no samples for that
 tick, which the charts render as a gap -- the truthful picture.
+
+The thread carries a third schedule that is not a sampler: traffic quota
+enforcement (:mod:`app.services.quota`). It rides here because it wants the
+same counters, and the traffic pass donates the ones it has already read.
 """
 from __future__ import annotations
 
@@ -17,6 +21,7 @@ from typing import Any
 
 from ..db import get_db, utc_now
 from ..settings_store import get_setting
+from . import quota
 
 logger = logging.getLogger(__name__)
 
@@ -39,13 +44,15 @@ def stop() -> None:
 
 
 def _loop() -> None:
-    # Two independent schedules share the thread: traffic ticks in minutes,
+    # Three independent schedules share the thread: traffic ticks in minutes,
     # sessions in seconds -- session comings and goings are worth catching at
-    # a resolution that would be wasteful for cumulative byte counters. The
-    # first samples are taken shortly after startup so a fresh install has
-    # data within a minute, not after a full interval.
+    # a resolution that would be wasteful for cumulative byte counters -- and
+    # quota enforcement in seconds too, because a ceiling that bites minutes
+    # late is a ceiling that leaked. The first pass runs shortly after startup
+    # so a fresh install has data within a minute, not after a full interval.
     next_traffic = time.monotonic() + 15
     next_sessions = time.monotonic() + 15
+    next_quota = time.monotonic() + 15
     while not _stop.is_set():
         now = time.monotonic()
         if now >= next_traffic:
@@ -68,6 +75,16 @@ def _loop() -> None:
             except Exception:  # noqa: BLE001
                 seconds = 60
             next_sessions = time.monotonic() + seconds
+        if now >= next_quota:
+            try:
+                quota.tick()
+            except Exception:  # noqa: BLE001 - a ceiling failing to bite must not kill the thread
+                logger.exception("quota enforcement failed")
+            try:
+                seconds = max(10, int(get_setting("quota_interval_seconds")))
+            except Exception:  # noqa: BLE001
+                seconds = 60
+            next_quota = time.monotonic() + seconds
         _stop.wait(_TICK)
 
 
@@ -79,11 +96,12 @@ def _flag(key: str, default: bool = True) -> bool:
 
 
 def sample_all() -> dict[str, Any]:
-    """One full sampling pass -- traffic and sessions together. Kept for
-    tests and manual invocation; the background loop schedules the two
-    halves independently."""
+    """One full pass -- traffic, sessions and quotas together. Kept for tests
+    and manual invocation; the background loop schedules the three
+    independently."""
     out = sample_traffic()
     out["sessions"] = sample_sessions()
+    out["quotas"] = quota.tick()
     return out
 
 
@@ -186,10 +204,34 @@ def sample_traffic() -> dict[str, Any]:
                 user_rows,
             )
         _prune(db)
+        # The counters are already in hand and a quota's arithmetic is
+        # idempotent, so the ceilings get a free look at them -- the quota
+        # tick's own read is what covers the gap between these slower passes.
+        _feed_quotas(hub_rows, user_rows)
         return {"hubs": len(hub_rows), "users": len(user_rows)}
     except Exception as exc:  # noqa: BLE001 - an offline server is a gap, not a crash
         logger.debug("sampling failed: %s", exc)
         return {"hubs": 0, "users": 0, "error": str(exc)}
+
+
+def _feed_quotas(hub_rows: list[dict[str, Any]], user_rows: list[dict[str, Any]]) -> None:
+    """Hand the traffic pass's readings to the quota ledger."""
+    try:
+        if not bool(get_setting("quota_enforcement_enabled")):
+            return
+    except Exception:  # noqa: BLE001 - before the database is ready, assume on
+        pass
+    readings = [
+        {"subject": "hub", "hub": r["hub"], "send": r["send"], "recv": r["recv"]}
+        for r in hub_rows
+    ] + [
+        {"subject": "user", "hub": r["hub"], "user": r["name"], "send": r["send"], "recv": r["recv"]}
+        for r in user_rows
+    ]
+    try:
+        quota.absorb_and_enforce(readings)
+    except Exception:  # noqa: BLE001 - a ceiling failing must not lose the samples
+        logger.exception("quota update from the traffic pass failed")
 
 
 def _sample_sessions(client: Any, db: Any, hub: str, now: str) -> None:
