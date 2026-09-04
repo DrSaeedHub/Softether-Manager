@@ -35,7 +35,7 @@ function QuotaSection({ hub, onChanged }: { hub: string; onChanged: () => void }
   return (
     <>
       <SectionTitle>Traffic limit</SectionTitle>
-      <QuotaCard subject="hub" hub={hub} onChanged={onChanged} />
+      <QuotaCard hub={hub} onChanged={onChanged} />
     </>
   );
 }

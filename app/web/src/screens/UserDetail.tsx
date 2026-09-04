@@ -13,11 +13,11 @@ import {
   useReveal,
 } from "../components/bits";
 import { PolicyEditor, extractPolicy } from "../components/PolicyEditor";
-import { QuotaCard } from "../components/QuotaCard";
+import { QuotaSummary } from "../components/QuotaCard";
 import { RangeSeg, TrafficChart } from "../components/TrafficChart";
 import { UserSheet } from "../components/UserSheet";
 import { VpnFileSheet } from "../components/VpnFileSheet";
-import { api, type Usage, type Wire } from "../lib/api";
+import { api, type Quota, type Usage, type Wire } from "../lib/api";
 import { Sheet } from "../ui/Sheet";
 import { Spark } from "../components/ResourceCards";
 import { Link, navigate, seg } from "../lib/router";
@@ -130,6 +130,7 @@ export function UserDetail({ hub, name }: { hub: string; name: string }) {
   const [history, setHistory] = useState<Wire[] | null>(null);
   const [historyExhausted, setHistoryExhausted] = useState(false);
   const [usage, setUsage] = useState<Usage | null>(null);
+  const [quota, setQuota] = useState<Quota | null>(null);
   const [hours, setHours] = useState(24);
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -149,6 +150,10 @@ export function UserDetail({ hub, name }: { hub: string; name: string }) {
     }
     const s = await api.userSessions(hub, name).catch(() => null);
     if (s) setSessions((s.SessionList as Wire[]) ?? []);
+    // The limit fills as the sampler ticks, so it re-reads with the rest of
+    // the page. Nothing here (a 404 for "no limit on this config" included) is
+    // worth an error: the section simply does not render.
+    setQuota(await api.userQuota(hub, name).catch(() => null));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hub, name, policyDirty]);
   usePoll(load, "detail", [hub, name]);
@@ -261,6 +266,21 @@ export function UserDetail({ hub, name }: { hub: string; name: string }) {
         </div>
       </div>
 
+      {quota && (
+        <>
+          <SectionTitle
+            actions={
+              <button className="btn btn--sm" onClick={() => setEditing(true)}>Change</button>
+            }
+          >
+            Traffic limit
+          </SectionTitle>
+          <div className="card" style={{ padding: "var(--s4)", maxWidth: 640 }}>
+            <QuotaSummary quota={quota} subject="user" />
+          </div>
+        </>
+      )}
+
       <SectionTitle actions={<RangeSeg hours={hours} onChange={setHours} />}>Usage</SectionTitle>
       <div className="card" style={{ padding: "var(--s4)" }}>
         {usage ? (
@@ -346,9 +366,6 @@ export function UserDetail({ hub, name }: { hub: string; name: string }) {
           />
         </div>
       )}
-
-      <SectionTitle>Traffic limit</SectionTitle>
-      <QuotaCard subject="user" hub={hub} name={name} onChanged={load} />
 
       <SectionTitle>Security policy</SectionTitle>
       <div className="card" style={{ padding: "var(--s4)", maxWidth: 720 }}>

@@ -1,21 +1,36 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, type Wire } from "../lib/api";
+import { api, ApiError, type Quota, type Wire } from "../lib/api";
 import { AUTH_TYPE_OPTIONS, isNever } from "../lib/se";
 import { useToast } from "../lib/toast";
 import { fileToBase64 } from "../lib/util";
 import { Sheet } from "../ui/Sheet";
 import { ErrorAlert, Field } from "./bits";
+import {
+  EMPTY_DRAFT,
+  UserQuotaBlock,
+  draftAmount,
+  draftOf,
+  saveUserQuotaDraft,
+  type QuotaDraft,
+} from "./QuotaCard";
 
 /**
- * Create a user, or edit one's identity: name, group, authentication, expiry.
- * The security policy is deliberately NOT here -- it is a different decision
- * with forty knobs, and it lives on the user's own page.
+ * Create a user, or edit one's identity: name, group, authentication, expiry,
+ * and how much traffic it may move. The security policy is deliberately NOT
+ * here -- it is a different decision with forty knobs, and it lives on the
+ * user's own page.
  *
  * Editing merges into what the server already has (GetUser -> SetUser), so an
  * untouched field survives the round trip. The password is only ever sent
  * when a new one was typed.
+ *
+ * The traffic limit is a panel record rather than a SoftEther one, so it is a
+ * second write after the user exists -- which is also why it cannot be part
+ * of the same atomic save. The amount is validated *before* anything is sent,
+ * so a typo cannot leave a user created with no limit; if the second write
+ * fails anyway, the sheet stays open and says exactly what did land.
  */
 export function UserSheet({
   hub,
@@ -55,6 +70,9 @@ export function UserSheet({
   });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [quota, setQuota] = useState<Quota | null>(null);
+  const [quotaDraft, setQuotaDraft] = useState<QuotaDraft>(EMPTY_DRAFT);
+  const [quotaTouched, setQuotaTouched] = useState(false);
   const { push } = useToast();
 
   useEffect(() => {
@@ -63,6 +81,31 @@ export function UserSheet({
       .then((r) => setGroups(((r.GroupList as Wire[]) ?? []).map((g) => String(g.Name_str))))
       .catch(() => {});
   }, [hub]);
+
+  // The config's ceiling, if it has one. A 404 is the ordinary answer for
+  // "no limit here" and leaves the block switched off.
+  useEffect(() => {
+    if (!editing) return;
+    let stale = false;
+    void api
+      .userQuota(hub, String(existing?.Name_str))
+      .then((q) => {
+        if (stale) return;
+        setQuota(q);
+        // Only seed the form if it has not been touched: the read is fast, but
+        // an operator who got there first must not have their edit overwritten.
+        setQuotaDraft((current) => (quotaTouched ? current : draftOf(q)));
+      })
+      .catch((e) => {
+        if (!stale && (!(e instanceof ApiError) || e.status !== 404)) {
+          push("err", e instanceof Error ? e.message : String(e));
+        }
+      });
+    return () => {
+      stale = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing, hub, existing, push]);
 
   const save = async () => {
     setError(null);
@@ -88,6 +131,9 @@ export function UserSheet({
       if (authType === 5) body.NtUsername_utf = ntUser;
 
       const userName = editing ? String(existing?.Name_str) : name.trim();
+      // Validated before the first write, so a bad limit cannot leave a user
+      // half-configured behind it.
+      if (quotaDraft.on) draftAmount(quotaDraft);
       if (editing) {
         await api.setUser(hub, userName, body);
       } else {
@@ -105,6 +151,15 @@ export function UserSheet({
           merged.GroupName_str = group;
           await api.setUser(hub, userName, merged);
         }
+      }
+      try {
+        await saveUserQuotaDraft(hub, userName, quotaDraft, Boolean(quota));
+      } catch (e) {
+        setError(
+          `${editing ? "The profile was saved" : `User ${userName} was created`}, but its traffic ` +
+            `limit was not: ${e instanceof Error ? e.message : String(e)}`,
+        );
+        return;
       }
       push("ok", editing ? "User updated." : `User ${userName} created.`);
       onSaved(userName);
@@ -214,6 +269,15 @@ export function UserSheet({
         <Field label="Expires" hint="After this moment the user cannot connect. Empty means never.">
           <input className="input mono" type="datetime-local" value={expires} onChange={(e) => setExpires(e.target.value)} />
         </Field>
+
+        <UserQuotaBlock
+          quota={quota}
+          draft={quotaDraft}
+          onChange={(next) => {
+            setQuotaDraft(next);
+            setQuotaTouched(true);
+          }}
+        />
       </div>
     </Sheet>
   );

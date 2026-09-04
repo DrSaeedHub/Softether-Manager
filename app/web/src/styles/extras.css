@@ -908,6 +908,10 @@
 .quota {
   display: grid;
   gap: var(--s3);
+}
+/* The gap belongs between the summary and whatever form follows it — read-only,
+   the summary is the last thing in its card and should not trail space. */
+.quota:not(:last-child) {
   margin-bottom: var(--s4);
 }
 .quota__head {
