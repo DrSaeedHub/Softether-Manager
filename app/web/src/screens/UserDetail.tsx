@@ -13,7 +13,7 @@ import {
   useReveal,
 } from "../components/bits";
 import { PolicyEditor, extractPolicy } from "../components/PolicyEditor";
-import { QuotaSummary, netBytes } from "../components/QuotaCard";
+import { QuotaEnforceSwitch, QuotaSummary, netBytes } from "../components/QuotaCard";
 import { RangeSeg, TrafficChart } from "../components/TrafficChart";
 import { UserSheet } from "../components/UserSheet";
 import { VpnFileSheet } from "../components/VpnFileSheet";
@@ -278,6 +278,7 @@ export function UserDetail({ hub, name }: { hub: string; name: string }) {
             Traffic limit
           </SectionTitle>
           <div className="card" style={{ padding: "var(--s4)", maxWidth: 640 }}>
+            <QuotaEnforceSwitch quota={quota} subject="user" onChanged={setQuota} />
             <QuotaSummary quota={quota} subject="user" net={bytes} />
           </div>
         </>

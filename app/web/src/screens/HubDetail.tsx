@@ -2,13 +2,14 @@
 
 import { useCallback, useState } from "react";
 import { LoadingBlock, PageHead, SectionTitle, usePoll } from "../components/bits";
+import { QuotaStatePill, quotaKey, useQuotaIndex } from "../components/QuotaCard";
 import { RangeSeg, TrafficChart } from "../components/TrafficChart";
 import { api, type Usage, type Wire } from "../lib/api";
 import { HUB_TYPES } from "../lib/se";
 import { Link, navigate, seg } from "../lib/router";
-import { useToast } from "../lib/toast";
 import { formatBytes, formatCount, formatDate } from "../lib/util";
 import { OnlinePill } from "../ui/Status";
+import { OutcomeNote, Switch, useToggle } from "../ui/Switch";
 import { HubUsers } from "./hub/HubUsers";
 import { HubGroups } from "./hub/HubGroups";
 import { HubSessions } from "./hub/HubSessions";
@@ -40,28 +41,40 @@ const TABS: { key: string; label: string }[] = [
 
 export function HubDetail({ hub, tab }: { hub: string; tab: string }) {
   const [status, setStatus] = useState<Wire | null>(null);
-  const { guard } = useToast();
+  const quotas = useQuotaIndex([hub]);
 
   const load = useCallback(async () => {
-    setStatus(await api.hubStatus(hub).catch(() => null));
+    const next = await api.hubStatus(hub).catch(() => null);
+    setStatus(next);
+    return next ? Boolean(next.Online_bool) : null;
   }, [hub]);
   usePoll(load, "detail", [hub]);
 
   const online = Boolean(status?.Online_bool);
 
-  const toggleOnline = () =>
-    guard(async () => {
-      await api.hubOnline(hub, !online);
-      await load();
-    }, online ? "Hub taken offline." : "Hub brought online.");
+  // The hub's switch: the request flips it, the read-back decides what the
+  // header shows, and the control is locked in between.
+  const onlineToggle = useToggle({
+    value: status ? online : null,
+    apply: async (next) => {
+      const r = await api.hubOnline(hub, next);
+      setStatus((current) => ({ ...(current ?? {}), ...r }));
+      return Boolean(r.online);
+    },
+    reload: load,
+    noun: `Hub ${hub}`,
+    onWord: "online",
+    offWord: "offline",
+  });
 
   return (
     <div className="page">
       <PageHead
         title={
-          <span style={{ display: "inline-flex", alignItems: "center", gap: "var(--s3)", minWidth: 0 }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: "var(--s3)", minWidth: 0, flexWrap: "wrap" }}>
             <span className="truncate">{hub}</span>
             {status && <OnlinePill online={online} />}
+            <QuotaStatePill quota={quotas.get(quotaKey("hub", hub))} />
           </span>
         }
         sub={
@@ -76,9 +89,18 @@ export function HubDetail({ hub, tab }: { hub: string; tab: string }) {
         }
         actions={
           status && (
-            <button className={`btn ${online ? "" : "btn--primary"}`} onClick={toggleOnline}>
-              {online ? "Take offline" : "Bring online"}
-            </button>
+            <span className="switchbox">
+              <Switch
+                on={online}
+                pending={onlineToggle.pending}
+                target={onlineToggle.target}
+                onToggle={() => void onlineToggle.toggle()}
+                label="Hub online"
+                onWord="online"
+                offWord="offline"
+              />
+              <OutcomeNote outcome={onlineToggle.outcome} />
+            </span>
           )
         }
       />
@@ -106,7 +128,7 @@ export function HubDetail({ hub, tab }: { hub: string; tab: string }) {
       {tab === "securenat" && <HubSecureNat hub={hub} />}
       {tab === "links" && <HubLinks hub={hub} />}
       {tab === "tables" && <HubTables hub={hub} />}
-      {tab === "settings" && <HubSettings hub={hub} onChanged={load} />}
+      {tab === "settings" && <HubSettings hub={hub} onChanged={() => void load()} />}
     </div>
   );
 }
@@ -163,7 +185,7 @@ function HubOverview({ hub, status }: { hub: string; status: Wire | null }) {
           <div><div className="micro">last login</div><div className="mono">{formatDate(status.LastLoginTime_dt as string)}</div></div>
           <div><div className="micro">logins</div><div className="mono">{formatCount(status.NumLogin_u32 as number)}</div></div>
           <div><div className="micro">IP entries</div><div className="mono">{formatCount(status.NumIpTables_u32 as number)}</div></div>
-          <div><div className="micro">SecureNAT</div><div className="mono">{status.SecureNATEnabled_bool ? "enabled" : "off"}</div></div>
+          <div><div className="micro">SecureNAT</div><div className="mono">{status.SecureNATEnabled_bool ? "enabled" : "disabled"}</div></div>
         </div>
       </div>
     </>

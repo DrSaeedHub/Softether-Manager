@@ -3,15 +3,16 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from .. import hostguard
 from ..audit import record
 from ..config import settings
 from ..db import get_db
 from ..deps import CurrentUser
-from ..services import update_service
-from ..settings_store import all_settings, set_setting
+from ..services import tls, update_service
+from ..settings_store import all_settings, get_setting, set_setting
 from ..version import get_version
 
 router = APIRouter(prefix="/system", tags=["system"])
@@ -133,6 +134,157 @@ def put_panel_settings(body: SettingsIn, user: dict = CurrentUser) -> dict[str, 
     out = all_settings()
     out["restart_required"] = "web_path" in changed
     return out
+
+
+# --- the panel's domain and certificate ----------------------------------------
+
+
+class DomainIn(BaseModel):
+    """Every field optional: a PUT changes what it names and keeps the rest."""
+
+    domain: Optional[str] = Field(default=None, max_length=253)
+    https_port: Optional[int] = Field(default=None, ge=1, le=65535)
+    acme_email: Optional[str] = Field(default=None, max_length=254)
+    acme_staging: Optional[bool] = None
+    domain_only: Optional[bool] = None
+
+
+def _domain_state(request: Request) -> dict[str, Any]:
+    """The status, plus what this request tells us: the name it came in on,
+    and therefore whether the operator is already using the domain -- the
+    fact the domain-only switch is gated on."""
+    status = tls.manager.status()
+    came_in_on = hostguard.request_host(request.scope.get("headers", ()))
+    status["request_host"] = came_in_on
+    status["via_domain"] = bool(status["domain"]) and came_in_on == status["domain"]
+    status["via_loopback"] = hostguard.is_loopback(request.scope)
+    status["bind_port"] = settings.bind_port
+    status["web_path"] = str(get_setting("web_path") or "").strip().strip("/")
+    return status
+
+
+@router.get("/domain")
+def get_domain(request: Request, user: dict = CurrentUser) -> dict[str, Any]:
+    return _domain_state(request)
+
+
+@router.put("/domain")
+def put_domain(body: DomainIn, request: Request, user: dict = CurrentUser) -> dict[str, Any]:
+    changed: list[str] = []
+    current_domain = str(get_setting("domain") or "")
+    next_domain = current_domain
+
+    if body.domain is not None:
+        try:
+            next_domain = tls.normalise_domain(body.domain)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if body.https_port is not None:
+        if body.https_port == tls.HTTP_PORT:
+            raise HTTPException(
+                status_code=422,
+                detail="Port 80 carries the certificate validation and the redirect to HTTPS; choose another port for HTTPS itself.",
+            )
+        if body.https_port == settings.bind_port:
+            raise HTTPException(
+                status_code=422,
+                detail=f"The panel already serves plain HTTP on port {settings.bind_port}; HTTPS needs a port of its own.",
+            )
+
+    if body.acme_email is not None:
+        email = body.acme_email.strip()
+        if email and ("@" not in email or " " in email or email.startswith("@") or email.endswith("@")):
+            raise HTTPException(status_code=422, detail="That does not look like an email address.")
+
+    # The lock-out guard: domain-only can only be switched on by somebody
+    # who is already reaching the panel through the domain it names. A
+    # request from the machine itself does not count -- it would still get
+    # in afterwards, which proves nothing about anyone else.
+    wants_only = body.domain_only if body.domain_only is not None else bool(get_setting("domain_only"))
+    came_in_on = hostguard.request_host(request.scope.get("headers", ()))
+    if body.domain_only and not bool(get_setting("domain_only")):
+        if not next_domain:
+            raise HTTPException(status_code=422, detail="Set a domain before restricting access to it.")
+        if came_in_on != next_domain:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Open the panel through https://{next_domain}/ first and turn this on from there; "
+                f"this request came in as {came_in_on or 'an unnamed host'}, and the restriction would have locked you out.",
+            )
+
+    if body.domain is not None and next_domain != current_domain:
+        set_setting("domain", next_domain)
+        changed.append("domain")
+        # A restriction naming a domain that no longer applies is a lock-out
+        # in waiting; it does not survive the change.
+        if wants_only and body.domain_only is None:
+            set_setting("domain_only", False)
+            changed.append("domain_only")
+        tls.manager.forget(current_domain)
+    if body.https_port is not None and body.https_port != int(get_setting("https_port") or 443):
+        set_setting("https_port", body.https_port)
+        changed.append("https_port")
+    if body.acme_email is not None and body.acme_email.strip() != str(get_setting("acme_email") or ""):
+        set_setting("acme_email", body.acme_email.strip())
+        changed.append("acme_email")
+    if body.acme_staging is not None and body.acme_staging != bool(get_setting("acme_staging")):
+        set_setting("acme_staging", body.acme_staging)
+        changed.append("acme_staging")
+        tls.manager.forget(next_domain)
+    if body.domain_only is not None and body.domain_only != bool(get_setting("domain_only")):
+        if not next_domain and body.domain_only:
+            raise HTTPException(status_code=422, detail="Set a domain before restricting access to it.")
+        set_setting("domain_only", body.domain_only)
+        changed.append("domain_only")
+
+    if changed:
+        # Installed immediately, not at the manager's next tick: a request
+        # that turned the restriction on must already be bound by it.
+        hostguard.configure(str(get_setting("domain") or ""), bool(get_setting("domain_only")))
+        tls.manager.apply()
+        record(user, "domain.updated", "panel", str(get_setting("domain") or ""), ", ".join(changed))
+    out = _domain_state(request)
+    out["changed"] = changed
+    return out
+
+
+@router.delete("/domain")
+def delete_domain(request: Request, user: dict = CurrentUser) -> dict[str, Any]:
+    """Forget the domain: the listeners stop, the restriction lifts, the
+    certificate files stay on disk in case the same name comes back."""
+    previous = str(get_setting("domain") or "")
+    set_setting("domain", "")
+    set_setting("domain_only", False)
+    hostguard.configure("", False)
+    tls.manager.forget(previous)
+    tls.manager.apply()
+    record(user, "domain.removed", "panel", previous, "")
+    return _domain_state(request)
+
+
+@router.post("/domain/issue")
+def issue_domain_certificate(request: Request, user: dict = CurrentUser) -> dict[str, Any]:
+    """Obtain (or renew) the certificate now rather than on the schedule."""
+    if not str(get_setting("domain") or ""):
+        raise HTTPException(status_code=422, detail="Set a domain first.")
+    if not tls.manager.request_issue():
+        raise HTTPException(
+            status_code=409,
+            detail="A certificate request is already running; watch this one rather than starting another.",
+        )
+    record(user, "domain.certificate_requested", "panel", str(get_setting("domain") or ""), "")
+    out = _domain_state(request)
+    out["busy"] = True
+    out["phase"] = "issuing" if not out["certificate"].get("present") else "renewing"
+    return out
+
+
+@router.post("/domain/check")
+def check_domain(request: Request, user: dict = CurrentUser) -> dict[str, Any]:
+    """Re-run the DNS lookup and the listener supervision, and report."""
+    tls.manager.check_now()
+    return _domain_state(request)
 
 
 # --- updates -----------------------------------------------------------------

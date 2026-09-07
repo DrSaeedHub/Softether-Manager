@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { CpuCard, DiskCard, MemoryCard, NetworkCard, SwapCard } from "../components/ResourceCards";
 import { Empty, ErrorAlert, Field, LoadingBlock, SectionTitle, usePoll } from "../components/bits";
+import { QuotaStatePill, quotaKey, useQuotaIndex } from "../components/QuotaCard";
 import { api, type Wire } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useServer } from "../lib/server";
@@ -32,6 +33,9 @@ export function Dashboard() {
   const [resources, setResources] = useState<Wire | null>(null);
   const [overview, setOverview] = useState<Wire | null>(null);
   const [creatingHub, setCreatingHub] = useState(false);
+  // Every limit on the server in one request, so each hub row can say
+  // where it stands without a call per hub.
+  const quotas = useQuotaIndex([]);
 
   const loadResources = useCallback(async () => {
     setResources(await api.resources().catch(() => null));
@@ -161,6 +165,7 @@ export function Dashboard() {
                           </span>
                         </span>
                         <span className="feed__side">
+                          <QuotaStatePill quota={quotas.get(quotaKey("hub", name))} />
                           <OnlinePill online={online} />
                           <IconChevron size={15} style={{ color: "var(--text-faint)" }} />
                         </span>

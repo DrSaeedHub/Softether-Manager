@@ -62,6 +62,11 @@ sem -- manage the SoftEther Manager panel on this server.
   sem users                List the accounts that can sign in
   sem port <port>          Move the panel to another port
   sem path <path|none>     Change the secret web path ('none' serves at the root)
+  sem domain               Show the panel's domain, certificate and access restriction
+  sem domain set <name>    Give the panel a domain (it obtains the certificate itself)
+  sem domain clear         Remove the domain
+  sem domain only on|off   Restrict the panel to its domain -- or lift the restriction
+                           when a DNS change has locked you out
   sem edit-env             Edit the environment file, then restart
   sem uninstall            Remove the panel
   sem version              Print the installed version
@@ -105,22 +110,33 @@ env_value() {
   sed -n "s/^${key}=//p" "$ENV_PATH" | tail -n1
 }
 
+# The address people should use: the domain over HTTPS once its certificate
+# is on disk, the machine's first address over plain HTTP until then.
 panel_url() {
-  local json port path host
+  local json port path host domain https_port https_ready
   json="$(address_json || true)"
   if [[ -n "$json" ]]; then
     port="$(json_field "$json" port)"
     path="$(json_field "$json" web_path)"
+    domain="$(json_field "$json" domain)"
+    https_port="$(json_field "$json" https_port)"
+    https_ready="$(json_field "$json" https_ready)"
   fi
   [[ -n "${port:-}" ]] || port="$(env_value SEM_BIND_PORT || true)"
   [[ -n "${path:-}" ]] || path="$(env_value SEM_WEB_PATH || true)"
+  local suffix="/"
+  [[ -z "${path:-}" ]] || suffix="/$path/"
+  if [[ -n "${domain:-}" && "${https_ready:-}" == "true" ]]; then
+    if [[ "${https_port:-443}" == "443" ]]; then
+      printf 'https://%s%s' "$domain" "$suffix"
+    else
+      printf 'https://%s:%s%s' "$domain" "$https_port" "$suffix"
+    fi
+    return
+  fi
   host="$(hostname -I 2>/dev/null | awk '{print $1}')"
   [[ -n "$host" ]] || host="127.0.0.1"
-  if [[ -z "${path:-}" ]]; then
-    printf 'http://%s:%s/' "$host" "${port:-8000}"
-  else
-    printf 'http://%s:%s/%s/' "$host" "${port:-8000}" "$path"
-  fi
+  printf 'http://%s:%s%s' "$host" "${port:-8000}" "$suffix"
 }
 
 cmd_status() {
@@ -142,6 +158,15 @@ cmd_status() {
       warn "The stored web path and $ENV_PATH disagree."
       say "  stored:  '${stored_path:-(root)}'   <- what the panel uses"
       say "  file:    '${file_path:-(root)}'"
+    fi
+  fi
+  if [[ -n "$json" ]]; then
+    local domain https_ready domain_only
+    domain="$(json_field "$json" domain)"
+    https_ready="$(json_field "$json" https_ready)"
+    domain_only="$(json_field "$json" domain_only)"
+    if [[ -n "$domain" ]]; then
+      say "  Domain:   $domain ($([[ "$https_ready" == "true" ]] && printf 'certificate ready' || printf 'no certificate yet'); domain-only access $([[ "$domain_only" == "true" ]] && printf 'on' || printf 'off'))"
     fi
   fi
   say "  Files:    $APP_DIR"
@@ -295,6 +320,47 @@ cmd_path() {
   say ""
 }
 
+# The domain lives in the database like the web path; the running panel
+# picks a change up within half a minute, so no restart is needed -- except
+# that the restriction is what a locked-out operator is here to lift, and
+# waiting is unkind, so 'only off' restarts to make it immediate.
+cmd_domain() {
+  [[ -x "$VENV_PYTHON" ]] || die "The panel is not installed here."
+  local action="${1-show}"
+  shift || true
+  case "$action" in
+    show|"")
+      (cd "$APP_DIR" && set -a && . "$ENV_PATH" && set +a && "$VENV_PYTHON" -m app.manage domain show)
+      ;;
+    set)
+      require_root
+      [[ -n "${1-}" ]] || die "Usage: sem domain set <name>"
+      (cd "$APP_DIR" && set -a && . "$ENV_PATH" && set +a && "$VENV_PYTHON" -m app.manage domain set "$1")
+      say "The panel obtains a certificate on its own; watch Settings -> Domain & HTTPS, or 'sem domain'."
+      ;;
+    clear)
+      require_root
+      (cd "$APP_DIR" && set -a && . "$ENV_PATH" && set +a && "$VENV_PYTHON" -m app.manage domain clear)
+      ;;
+    only)
+      require_root
+      case "${1-}" in
+        on|off) ;;
+        *) die "Usage: sem domain only on|off" ;;
+      esac
+      (cd "$APP_DIR" && set -a && . "$ENV_PATH" && set +a && "$VENV_PYTHON" -m app.manage domain only "$1")
+      if [[ "$1" == "off" ]]; then
+        step "Restarting the panel so the restriction lifts at once"
+        systemctl restart "$SERVICE_NAME"
+      fi
+      say ""
+      say "  URL:  $(panel_url)"
+      say ""
+      ;;
+    *) die "Usage: sem domain [show | set <name> | clear | only on|off]" ;;
+  esac
+}
+
 cmd_logs() {
   local lines=100 follow=0
   while [[ $# -gt 0 ]]; do
@@ -347,6 +413,7 @@ menu() {
     printf '   8) Logs (last 100 lines)\n'
     printf '   9) Edit the environment file\n'
     printf '  10) Uninstall\n'
+    printf '  11) Domain, certificate and domain-only access\n'
     printf '   0) Quit\n'
     printf '\n'
     local choice=""
@@ -372,6 +439,22 @@ menu() {
       8) journalctl -u "$SERVICE_NAME" -n 100 --no-pager || true ;;
       9) cmd_edit_env ;;
       10) cmd_uninstall ;;
+      11)
+        cmd_domain show
+        say ""
+        say "  s) set a domain   c) clear it   on) domain-only on   off) domain-only off"
+        local choice2=""
+        read -r -p "  Choose (or Enter to go back): " choice2 </dev/tty || true
+        case "$choice2" in
+          s)
+            local name=""
+            read -r -p "  Domain: " name </dev/tty || true
+            [[ -n "$name" ]] && cmd_domain set "$name"
+            ;;
+          c) cmd_domain clear ;;
+          on|off) cmd_domain only "$choice2" ;;
+        esac
+        ;;
       0|q|Q) return 0 ;;
       *) warn "Not one of the options." ;;
     esac
@@ -399,6 +482,7 @@ case "$command" in
   users) cmd_users ;;
   port) cmd_port "${1-}" ;;
   path) cmd_path "$@" ;;
+  domain) cmd_domain "$@" ;;
   edit-env) cmd_edit_env ;;
   uninstall) cmd_uninstall "$@" ;;
   version) installed_version; printf '\n' ;;

@@ -919,3 +919,272 @@
   background: currentColor;
   opacity: 0.55;
 }
+
+/* ══════════════════════════════════════════════════════════════ switches ══ */
+/* A switch is a pressed track with a raised knob. On, the track lights lime
+ * and the knob carries a check -- a silhouette, so the state survives
+ * colour-blindness. Busy, the knob carries a spinner and the control locks. */
+
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  flex: none;
+  padding: 2px;
+  border-radius: var(--r-pill);
+  cursor: pointer;
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  background: none;
+  transition: color var(--d-fast) ease;
+}
+.switch:disabled {
+  cursor: default;
+}
+.switch:disabled:not(.switch--busy) {
+  opacity: 0.45;
+}
+.switch--busy {
+  cursor: progress;
+}
+.switch__track {
+  position: relative;
+  flex: none;
+  width: 46px;
+  height: 26px;
+  border-radius: var(--r-pill);
+  background: var(--glass-lo);
+  box-shadow: var(--nm-inset-sm);
+  transition:
+    background var(--d-quick) ease,
+    box-shadow var(--d-quick) ease,
+    opacity var(--d-quick) ease;
+}
+.switch__knob {
+  position: absolute;
+  top: 3px;
+  inset-inline-start: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--action-fg);
+  background: var(--card-grad);
+  box-shadow: var(--nm-raise-sm);
+  transition:
+    transform var(--d-quick) var(--ease-out-quart),
+    background var(--d-quick) ease;
+}
+.switch--on .switch__track {
+  background: linear-gradient(150deg, var(--action-bg-hi), var(--action-bg));
+  box-shadow:
+    inset 2px 2px 5px rgb(0 0 0 / 0.22),
+    0 0 14px rgb(126 201 59 / 0.28);
+}
+.switch--on .switch__knob {
+  transform: translateX(20px);
+  background: #fff;
+}
+[dir="rtl"] .switch--on .switch__knob {
+  transform: translateX(-20px);
+}
+.switch--busy .switch__track {
+  opacity: 0.75;
+}
+.switch__knob .spin {
+  width: 11px;
+  height: 11px;
+  border-width: 2px;
+  color: var(--text-muted);
+}
+.switch--on .switch__knob .spin {
+  color: var(--action-fg);
+}
+.switch:focus-visible {
+  outline: none;
+}
+.switch:focus-visible .switch__track {
+  box-shadow:
+    var(--nm-inset-sm),
+    0 0 0 2px var(--accent-line);
+}
+.switch__word {
+  font-size: var(--t-micro);
+  font-weight: 700;
+  white-space: nowrap;
+  min-width: 2.4em;
+  text-align: start;
+}
+.switch--on .switch__word {
+  color: var(--accent);
+}
+@media (hover: hover) and (pointer: fine) {
+  .switch:not(:disabled):hover .switch__word {
+    color: var(--text);
+  }
+}
+
+/* the verdict after a change */
+.outcome {
+  display: inline-block;
+  font-size: var(--t-micro);
+  font-weight: 700;
+  line-height: 1.4;
+  animation: outcome-in 220ms var(--ease-out-quart) both;
+}
+.outcome--ok {
+  color: var(--ok);
+}
+.outcome--err {
+  color: var(--err);
+}
+@keyframes outcome-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+}
+
+/* a labelled switch in a pressed well */
+.switchrow {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  border-radius: var(--r-ctl);
+  background: var(--glass-lo);
+  box-shadow: var(--nm-inset-sm);
+  margin-bottom: var(--s2);
+  transition: box-shadow var(--d-fast) ease;
+}
+.switchrow--on {
+  box-shadow:
+    var(--nm-inset-sm),
+    0 0 0 2px var(--accent-line);
+}
+.switchrow--off {
+  opacity: 0.7;
+}
+.switchrow__m {
+  flex: 1;
+  min-width: 0;
+}
+.switchrow .t {
+  display: block;
+  font-size: var(--t-body);
+  font-weight: 700;
+  color: var(--text);
+}
+.switchrow .s {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--t-small);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.switchrow__note {
+  display: block;
+  margin-top: 4px;
+}
+.switchrow__side {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--s3);
+  flex: none;
+  flex-wrap: wrap;
+}
+@media (max-width: 560px) {
+  .switchrow {
+    flex-wrap: wrap;
+  }
+  .switchrow__side {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
+/* a switch standing in a page header or a list row */
+.switchbox {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+/* ══════════════════════════════════════════════════════ status readouts ══ */
+/* Label, verdict pill, explanation -- one row per thing that can be wrong. */
+
+.statrows {
+  display: grid;
+}
+.statrow {
+  display: grid;
+  grid-template-columns: 118px auto minmax(0, 1fr);
+  gap: var(--s2) var(--s3);
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--glass-line);
+}
+.statrow:last-child {
+  border-bottom: 0;
+}
+.statrow__k {
+  font-size: var(--t-micro);
+  font-weight: 700;
+  color: var(--text-faint);
+}
+.statrow__v {
+  font-size: var(--t-small);
+  line-height: 1.5;
+  color: var(--text-2);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.statrow__v .mono {
+  font-size: var(--t-data);
+}
+.statrow__v--err {
+  color: var(--err);
+}
+@media (max-width: 640px) {
+  .statrow {
+    grid-template-columns: 1fr auto;
+  }
+  .statrow__v {
+    grid-column: 1 / -1;
+  }
+}
+.progressline {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s3) var(--s4);
+  border-radius: var(--r-ctl);
+  background: var(--busy-soft);
+  color: var(--busy);
+  font-size: var(--t-small);
+  font-weight: 700;
+  margin-bottom: var(--s3);
+}
+.eventlist {
+  display: grid;
+  gap: 6px;
+  margin-top: var(--s3);
+}
+.eventlist__i {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--s3);
+  font-size: var(--t-micro);
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.eventlist__i .mono {
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+.eventlist__i--failed {
+  color: var(--err);
+}

@@ -8,6 +8,7 @@ import { CheckRow, Field, usePoll } from "./bits";
 import { Sheet } from "../ui/Sheet";
 import { IconTrash } from "../ui/Icon";
 import { Pill } from "../ui/Status";
+import { SwitchRow, useToggle } from "../ui/Switch";
 
 /**
  * The traffic ceiling: how much may move, which direction counts, and whether
@@ -419,6 +420,88 @@ export function quotaSortValue(quota: Quota | undefined, net?: Bytes): number {
   return percentOf(meteredBytes(moved, quota.metric), quota.limit_bytes);
 }
 
+/**
+ * The limit's state in one pill, for a hub's header and the dashboard feed:
+ * whether one exists, whether it is armed, how far into it the hub is, and
+ * -- worst first -- whether it has already bitten.
+ */
+export function QuotaStatePill({ quota, net }: { quota: Quota | undefined | null; net?: Bytes }) {
+  if (!quota?.has_limit) return null;
+  const moved: Bytes = net ?? { send: quota.upload_bytes, recv: quota.download_bytes };
+  const percent = Math.round(percentOf(meteredBytes(moved, quota.metric), quota.limit_bytes));
+  const title = `${formatBytes(meteredBytes(moved, quota.metric))} of ${formatBytes(quota.limit_bytes)} ${METRIC_WORD[quota.metric]}`;
+  if (quota.blocked) return <span title={title}><Pill kind="err" label="over limit" /></span>;
+  if (!quota.enabled) return <span title={title}><Pill kind="idle" label={`limit off · ${percent}%`} /></span>;
+  if (percent >= 100) return <span title={title}><Pill kind="busy" label="limit spent" /></span>;
+  return <span title={title}><Pill kind={percent >= 80 ? "warn" : "ok"} label={`limit ${percent}%`} /></span>;
+}
+
+/**
+ * The one switch a limit has: armed or not. It talks to the server at once
+ * and shows the state read back, never the state asked for. Shared by the
+ * hub card and the user page.
+ */
+export function QuotaEnforceSwitch({
+  quota,
+  subject,
+  onChanged,
+}: {
+  quota: Quota;
+  subject: "hub" | "user";
+  /** Called with the quota as the server reports it after the switch. */
+  onChanged: (next: Quota) => void;
+}) {
+  const noun = subject === "hub" ? "The hub's traffic limit" : "The config's traffic limit";
+  const read = async () =>
+    subject === "hub" ? api.hubQuota(quota.hub) : api.userQuota(quota.hub, quota.username);
+  const toggle = useToggle({
+    value: quota.enabled,
+    apply: async (next) => {
+      const fresh =
+        subject === "hub"
+          ? await api.setHubQuotaEnabled(quota.hub, next)
+          : await api.setUserQuotaEnabled(quota.hub, quota.username, next);
+      onChanged(fresh);
+      return fresh.enabled;
+    },
+    reload: async () => {
+      try {
+        const fresh = await read();
+        onChanged(fresh);
+        return fresh.enabled;
+      } catch {
+        return null;
+      }
+    },
+    noun,
+    onWord: "enforced",
+    offWord: "not enforced",
+  });
+  return (
+    <SwitchRow
+      label="Enforce this limit"
+      hint={
+        quota.enabled
+          ? subject === "hub"
+            ? "Armed: reaching the ceiling takes the hub offline until the limit is raised or the transfer reset."
+            : "Armed: reaching the ceiling denies this config access and cuts its sessions."
+          : "Off: the transfer still counts and the meter still fills, but nothing is ever cut off. Turning it back on re-applies the ceiling at once."
+      }
+      status={
+        quota.blocked ? (
+          <Pill kind="err" label={subject === "hub" ? "hub offline" : "cut off"} />
+        ) : (
+          <Pill kind={quota.enabled ? "ok" : "idle"} label={quota.enabled ? "enforced" : "not enforced"} />
+        )
+      }
+      toggle={toggle}
+      on={quota.enabled}
+      onWord="enforced"
+      offWord="off"
+    />
+  );
+}
+
 /** Used / limit with a bar, for a table cell. `net` is the row's own
  *  Transfer, so the two columns can never disagree. */
 export function QuotaCell({ quota, net }: { quota: Quota | undefined; net?: Bytes }) {
@@ -461,6 +544,16 @@ export function QuotaCard({ hub, onChanged }: { hub: string; onChanged?: () => v
     setDirty(false);
   }, []);
 
+  // The enforcement switch changes the quota without touching whatever the
+  // operator is typing into the form beside it.
+  const absorb = useCallback(
+    (next: Quota) => {
+      setQuota(next);
+      if (!dirty) setDraft(draftOf(next));
+    },
+    [dirty],
+  );
+
   const load = useCallback(async () => {
     try {
       adopt(await api.hubQuota(hub));
@@ -500,7 +593,9 @@ export function QuotaCard({ hub, onChanged }: { hub: string; onChanged?: () => v
           limit: amount,
           unit: draft.unit,
           metric: draft.metric,
-          enabled: draft.enforce,
+          // The switch above the form is the one place an existing limit is
+          // armed or disarmed; a save keeps whatever it says.
+          enabled: quota?.has_limit ? quota.enabled : draft.enforce,
         }),
       );
     }, "Traffic limit saved.");
@@ -526,6 +621,7 @@ export function QuotaCard({ hub, onChanged }: { hub: string; onChanged?: () => v
 
   return (
     <div className="card" style={{ padding: "var(--s4)", maxWidth: 640 }}>
+      {quota?.has_limit && <QuotaEnforceSwitch quota={quota} subject="hub" onChanged={(next) => { absorb(next); onChanged?.(); }} />}
       {quota?.has_limit ? (
         <QuotaSummary quota={quota} subject="hub" />
       ) : (
@@ -538,12 +634,12 @@ export function QuotaCard({ hub, onChanged }: { hub: string; onChanged?: () => v
 
       <QuotaFields draft={draft} onChange={change} />
 
-      {quota?.has_limit && (
+      {!quota?.has_limit && (
         <CheckRow
           checked={draft.enforce}
           onChange={(v) => change({ ...draft, enforce: v })}
-          label="Enforce this limit"
-          hint="Off, the counter keeps running and the meter keeps filling, but the hub is never taken offline — useful for watching what it would use before committing to a ceiling."
+          label="Enforce this limit from the start"
+          hint="Off, the counter runs and the meter fills, but the hub is never taken offline — useful for watching what it would use before committing to a ceiling. It can be switched either way afterwards."
         />
       )}
 

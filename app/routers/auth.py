@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from ..audit import record
@@ -30,13 +30,17 @@ def _account_count() -> int:
     return int(row["n"]) if row else 0
 
 
-def _issue(response: Response, user_id: int, username: str) -> dict[str, Any]:
+def _issue(request: Request, response: Response, user_id: int, username: str) -> dict[str, Any]:
     token = make_token(user_id, username, settings.session_expire_minutes)
+    # A session issued over HTTPS is marked Secure, so a browser never sends
+    # it back over the plain-HTTP port; one issued over plain HTTP cannot be,
+    # or the browser would drop it on the spot.
     response.set_cookie(
         SESSION_COOKIE,
         token,
         max_age=settings.session_expire_minutes * 60,
         httponly=True,
+        secure=request.url.scheme == "https",
         samesite="lax",
         path="/",
     )
@@ -50,7 +54,7 @@ def auth_state() -> dict[str, Any]:
 
 
 @router.post("/setup")
-def setup(body: Credentials, response: Response) -> dict[str, Any]:
+def setup(body: Credentials, request: Request, response: Response) -> dict[str, Any]:
     """Create the first account. Refused once any account exists."""
     if _account_count() > 0:
         raise HTTPException(status_code=409, detail="An account already exists on this panel.")
@@ -61,11 +65,11 @@ def setup(body: Credentials, response: Response) -> dict[str, Any]:
         {"u": body.username, "h": hash_password(body.password), "now": now},
     )
     record({"UserID": user_id, "Username": body.username}, "auth.setup", "panel_user", body.username)
-    return _issue(response, user_id, body.username)
+    return _issue(request, response, user_id, body.username)
 
 
 @router.post("/login")
-def login(body: Credentials, response: Response) -> dict[str, Any]:
+def login(body: Credentials, request: Request, response: Response) -> dict[str, Any]:
     user = get_db().query_one(
         'SELECT * FROM "PanelUser" WHERE "Username" = :u AND "IsDeleted" = 0',
         {"u": body.username},
@@ -73,7 +77,7 @@ def login(body: Credentials, response: Response) -> dict[str, Any]:
     if user is None or not verify_password(body.password, user["PasswordHash"]):
         # One answer for both a wrong name and a wrong password.
         raise HTTPException(status_code=401, detail="Wrong username or password.")
-    return _issue(response, int(user["UserID"]), user["Username"])
+    return _issue(request, response, int(user["UserID"]), user["Username"])
 
 
 @router.post("/logout")

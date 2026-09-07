@@ -1068,6 +1068,21 @@ if [[ "$PUBLIC_HOST" == "0.0.0.0" || "$PUBLIC_HOST" == "::" ]]; then
   [[ -n "$PUBLIC_HOST" ]] || PUBLIC_HOST="127.0.0.1"
 fi
 PANEL_URL="http://$PUBLIC_HOST:$PORT$(base_path "$WEB_PATH")"
+# A panel that already has a domain with a certificate is reached there.
+if (( UPGRADE_EXISTING == 1 )); then
+  ADDRESS_JSON="$(cd "$APP_DIR" && set -a && . "$ENV_PATH" && set +a && "$VENV_PYTHON" -m app.address 2>/dev/null || true)"
+  if [[ -n "$ADDRESS_JSON" ]]; then
+    PANEL_DOMAIN="$(printf '%s' "$ADDRESS_JSON" | sed -n 's/.*"domain"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+    PANEL_HTTPS_PORT="$(printf '%s' "$ADDRESS_JSON" | sed -n 's/.*"https_port"[[:space:]]*:[[:space:]]*\([0-9]\{1,\}\).*/\1/p' | head -n1)"
+    if [[ -n "$PANEL_DOMAIN" ]] && printf '%s' "$ADDRESS_JSON" | grep -q '"https_ready"[[:space:]]*:[[:space:]]*true'; then
+      if [[ "${PANEL_HTTPS_PORT:-443}" == "443" ]]; then
+        PANEL_URL="https://$PANEL_DOMAIN$(base_path "$WEB_PATH")"
+      else
+        PANEL_URL="https://$PANEL_DOMAIN:$PANEL_HTTPS_PORT$(base_path "$WEB_PATH")"
+      fi
+    fi
+  fi
+fi
 
 if [[ $JSON_OUTPUT -eq 1 ]]; then
   printf '{"action":"%s","url":"%s","port":%s,"web_path":"%s","served_at_root":%s,"username":"%s","account_created":%s,"service":"%s","version":"%s","app_dir":"%s","data_dir":"%s","cli":"%s","softether_installed":%s,"softether_present":%s,"softether_connected":%s}\n' \
@@ -1110,10 +1125,12 @@ say ""
 case "$BIND_ADDRESS" in
   127.*|::1|localhost) ;;
   *)
-    warn "The panel is bound to $BIND_ADDRESS and serves plain HTTP."
-    warn "Passwords and session tokens will cross the network unencrypted."
-    warn "Put a TLS-terminating reverse proxy in front of it, or bind to 127.0.0.1"
-    warn "and reach it through an SSH tunnel."
+    if [[ "$PANEL_URL" != https://* ]]; then
+      warn "The panel is bound to $BIND_ADDRESS and serves plain HTTP."
+      warn "Passwords and session tokens will cross the network unencrypted."
+      warn "Give it a domain under Settings -> Domain & HTTPS (or 'sem domain set <name>')"
+      warn "and it obtains a Let's Encrypt certificate and serves HTTPS on its own."
+    fi
     ;;
 esac
 

@@ -9,6 +9,7 @@ import { downloadBase64, fileToBase64, formatBytes, formatDate, timeAgo } from "
 import { IconDownload, IconPlus, IconTrash, IconUpload } from "../ui/Icon";
 import { Sheet } from "../ui/Sheet";
 import { OnlinePill, Pill } from "../ui/Status";
+import { OutcomeNote, Switch, SwitchRow, useToggle } from "../ui/Switch";
 
 /**
  * Everything server-wide, as one scrolling document of cards -- listeners,
@@ -55,8 +56,10 @@ function ListenersCard() {
 
   const load = useCallback(async () => {
     const r = await api.listeners().catch(() => null);
-    if (r) setListeners((r.ListenerList as Wire[]) ?? []);
+    const list = r ? ((r.ListenerList as Wire[]) ?? []) : null;
+    if (list) setListeners(list);
     setSpecial(await api.specialListener().catch(() => null));
+    return list;
   }, []);
   usePoll(load, "list", []);
 
@@ -79,17 +82,13 @@ function ListenersCard() {
           listeners.map((l) => (
             <div key={String(l.Ports_u32)} className="lrow">
               <span className="mono" style={{ fontSize: "var(--t-data)", fontWeight: 600 }}>{String(l.Ports_u32)}</span>
-              {l.Errors_bool ? <Pill kind="err" label="error" /> : <OnlinePill online={Boolean(l.Enables_bool)} onLabel="listening" offLabel="disabled" />}
+              {l.Errors_bool ? (
+                <span title="The port is enabled but could not be opened — something else holds it."><Pill kind="err" label="cannot open" /></span>
+              ) : (
+                <OnlinePill online={Boolean(l.Enables_bool)} onLabel="listening" offLabel="disabled" />
+              )}
               <span style={{ flex: 1 }} />
-              <button
-                className="btn btn--sm"
-                onClick={() => void guard(async () => {
-                  await api.toggleListener(Number(l.Ports_u32), !l.Enables_bool);
-                  await load();
-                })}
-              >
-                {l.Enables_bool ? "Disable" : "Enable"}
-              </button>
+              <ListenerSwitch listener={l} reload={load} />
               <button
                 className="btn btn--sm btn--ghost"
                 onClick={() => void guard(async () => {
@@ -105,23 +104,19 @@ function ListenersCard() {
         )}
         {special && (
           <div style={{ marginTop: "var(--s3)" }}>
-            <CheckRow
-              checked={Boolean(special.VpnOverIcmpListener_bool)}
-              onChange={(v) => void guard(async () => {
-                await api.setSpecialListener({ ...special, VpnOverIcmpListener_bool: v });
-                await load();
-              })}
+            <SpecialListenerSwitch
+              special={special}
+              field="VpnOverIcmpListener_bool"
               label="VPN over ICMP"
               hint="Clients tunnel in ping packets — crosses networks that allow nothing else."
+              onFresh={setSpecial}
             />
-            <CheckRow
-              checked={Boolean(special.VpnOverDnsListener_bool)}
-              onChange={(v) => void guard(async () => {
-                await api.setSpecialListener({ ...special, VpnOverDnsListener_bool: v });
-                await load();
-              })}
+            <SpecialListenerSwitch
+              special={special}
+              field="VpnOverDnsListener_bool"
               label="VPN over DNS"
               hint="Tunnels in DNS queries on UDP 53. Slow, and a last resort."
+              onFresh={setSpecial}
             />
           </div>
         )}
@@ -155,7 +150,121 @@ function ListenersCard() {
   );
 }
 
+/** One listener's switch. The word beside it is the request; the pill in the
+ *  row is the server's answer, read back after every change. */
+function ListenerSwitch({ listener, reload }: { listener: Wire; reload: () => Promise<Wire[] | null> }) {
+  const port = Number(listener.Ports_u32);
+  const toggle = useToggle({
+    value: Boolean(listener.Enables_bool),
+    apply: async (next) => {
+      const r = await api.toggleListener(port, next);
+      return Boolean(r.enabled);
+    },
+    reload: async () => {
+      const list = await reload();
+      const me = list?.find((x) => Number(x.Ports_u32) === port);
+      return me ? Boolean(me.Enables_bool) : null;
+    },
+    noun: `Listener ${port}`,
+    onWord: "enabled",
+    offWord: "disabled",
+  });
+  return (
+    <span className="switchbox">
+      <Switch
+        on={Boolean(listener.Enables_bool)}
+        pending={toggle.pending}
+        target={toggle.target}
+        onToggle={() => void toggle.toggle()}
+        label={`Listener on port ${port}`}
+      />
+      <OutcomeNote outcome={toggle.outcome} />
+    </span>
+  );
+}
+
+/** VPN-over-ICMP and VPN-over-DNS share one settings object; each switch
+ *  rewrites its own flag and reads the object back. */
+function SpecialListenerSwitch({
+  special,
+  field,
+  label,
+  hint,
+  onFresh,
+}: {
+  special: Wire;
+  field: "VpnOverIcmpListener_bool" | "VpnOverDnsListener_bool";
+  label: string;
+  hint: string;
+  onFresh: (fresh: Wire) => void;
+}) {
+  const on = Boolean(special[field]);
+  const toggle = useToggle({
+    value: on,
+    apply: async (next) => {
+      const r = await api.setSpecialListener({ ...special, [field]: next });
+      onFresh(r);
+      return Boolean(r[field]);
+    },
+    reload: async () => {
+      const r = await api.specialListener().catch(() => null);
+      if (r) onFresh(r);
+      return r ? Boolean(r[field]) : null;
+    },
+    noun: label,
+    onWord: "enabled",
+    offWord: "disabled",
+  });
+  return (
+    <SwitchRow
+      label={label}
+      hint={hint}
+      toggle={toggle}
+      on={on}
+      status={<Pill kind={on ? "ok" : "idle"} label={on ? "enabled" : "disabled"} />}
+    />
+  );
+}
+
 /* ── protocols ────────────────────────────────────────────────────────────── */
+
+/** VPN Azure: the switch, and beside it what the relay itself reports --
+ *  enabled is a wish until the server says "connected". */
+function AzureSwitch({ azure, onFresh }: { azure: Wire; onFresh: (fresh: Wire) => void }) {
+  const on = Boolean(azure.IsEnabled_bool);
+  const connected = Boolean(azure.IsConnected_bool);
+  const toggle = useToggle({
+    value: on,
+    apply: async (next) => {
+      const r = await api.setAzure(next);
+      onFresh(r);
+      return Boolean(r.IsEnabled_bool);
+    },
+    reload: async () => {
+      const r = await api.azure().catch(() => null);
+      if (r) onFresh(r);
+      return r ? Boolean(r.IsEnabled_bool) : null;
+    },
+    noun: "VPN Azure",
+    onWord: "enabled",
+    offWord: "disabled",
+  });
+  return (
+    <SwitchRow
+      label="VPN Azure relay"
+      hint="Reachable through azure even behind NAT, at <hostname>.vpnazure.net."
+      toggle={toggle}
+      on={on}
+      status={
+        on ? (
+          <Pill kind={connected ? "ok" : "busy"} label={connected ? "connected" : "connecting"} />
+        ) : (
+          <Pill kind="idle" label="disabled" />
+        )
+      }
+    />
+  );
+}
 
 function ProtocolsCard() {
   const [ipsec, setIpsec] = useState<Wire | null>(null);
@@ -273,11 +382,7 @@ function ProtocolsCard() {
             <LoadingBlock />
           ) : (
             <>
-              <CheckRow checked={Boolean(azure.IsEnabled_bool)} onChange={(v) => void guard(async () => {
-                await api.setAzure(v);
-                await load();
-              }, v ? "VPN Azure enabled." : "VPN Azure disabled.")}
-                label="VPN Azure relay" hint="Reachable through azure even behind NAT, at <hostname>.vpnazure.net." />
+              <AzureSwitch azure={azure} onFresh={setAzure} />
               <KV rows={[
                 ["DDNS hostname", String(ddns.CurrentHostName_str || "—")],
                 ["FQDN", String(ddns.CurrentFqdn_str || "—")],
@@ -576,7 +681,9 @@ function L3Card() {
 
   const load = useCallback(async () => {
     const r = await api.l3().catch(() => null);
-    if (r) setSwitches((r.L3SWList as Wire[]) ?? []);
+    const list = r ? ((r.L3SWList as Wire[]) ?? []) : null;
+    if (list) setSwitches(list);
+    return list;
   }, []);
   usePoll(load, "list", []);
 
@@ -599,12 +706,7 @@ function L3Card() {
                 <span className="micro">{String(s.NumInterfaces_u32 ?? 0)} if · {String(s.NumTables_u32 ?? 0)} routes</span>
                 <span style={{ flex: 1 }} />
                 <button className="btn btn--sm" onClick={() => setOpen(String(s.Name_str))}>Configure</button>
-                <button className="btn btn--sm" onClick={() => void guard(async () => {
-                  await (s.Active_bool ? api.stopL3(String(s.Name_str)) : api.startL3(String(s.Name_str)));
-                  await load();
-                })}>
-                  {s.Active_bool ? "Stop" : "Start"}
-                </button>
+                <L3Switch sw={s} reload={load} />
                 <button className="btn btn--sm btn--ghost" aria-label="Delete" onClick={() => void guard(async () => {
                   await api.delL3(String(s.Name_str));
                   await load();
@@ -628,6 +730,40 @@ function L3Card() {
       </div>
       {open && <L3Sheet name={open} onClose={() => { setOpen(null); void load(); }} />}
     </section>
+  );
+}
+
+/** Running / stopped for one layer-3 switch. */
+function L3Switch({ sw, reload }: { sw: Wire; reload: () => Promise<Wire[] | null> }) {
+  const name = String(sw.Name_str);
+  const toggle = useToggle({
+    value: Boolean(sw.Active_bool),
+    apply: async (next) => {
+      const r = await (next ? api.startL3(name) : api.stopL3(name));
+      return Boolean(r.active);
+    },
+    reload: async () => {
+      const list = await reload();
+      const me = list?.find((x) => String(x.Name_str) === name);
+      return me ? Boolean(me.Active_bool) : null;
+    },
+    noun: `Layer-3 switch ${name}`,
+    onWord: "running",
+    offWord: "stopped",
+  });
+  return (
+    <span className="switchbox">
+      <Switch
+        on={Boolean(sw.Active_bool)}
+        pending={toggle.pending}
+        target={toggle.target}
+        onToggle={() => void toggle.toggle()}
+        label={`Layer-3 switch ${name}`}
+        onWord="running"
+        offWord="stopped"
+      />
+      <OutcomeNote outcome={toggle.outcome} />
+    </span>
   );
 }
 

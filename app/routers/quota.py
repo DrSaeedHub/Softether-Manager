@@ -34,6 +34,12 @@ class QuotaIn(BaseModel):
     enabled: bool = True
 
 
+class EnabledIn(BaseModel):
+    """The one-switch body: arm the ceiling, or stand it down."""
+
+    enabled: bool
+
+
 def _fresh(subject: str, hub: str, username: str = "") -> Optional[Wire]:
     """One subject, with its counter read now rather than at the last tick.
 
@@ -81,6 +87,24 @@ def _missing(subject: str) -> HTTPException:
     return HTTPException(status_code=404, detail=f"No traffic limit is set on this {subject}.")
 
 
+def _switch(subject: str, hub: str, username: str, enabled: bool, user: dict) -> Wire:
+    """Arm or disarm a ceiling, then settle, so the answer carries the block
+    lifted (or applied) by the very switch that was just thrown -- the UI
+    shows the state the server is actually in, not the one it asked for."""
+    try:
+        quota.set_enabled(subject, hub, username, enabled)
+    except quota.QuotaError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    record(
+        user,
+        "quota.enforcement_toggled",
+        "hub" if subject == "hub" else "vpn_user",
+        hub if subject == "hub" else username,
+        ("enforced" if enabled else "not enforced") + (f" in hub {hub}" if subject == "user" else ""),
+    )
+    return _settle(subject, hub, username) or {}
+
+
 # --- everything at once ----------------------------------------------------------
 
 
@@ -105,6 +129,14 @@ def get_hub_quota(hub: str, user: dict = CurrentUser) -> Wire:
 @router.put("/hub/{hub}")
 def set_hub_quota(hub: str, body: QuotaIn, user: dict = CurrentUser) -> Wire:
     return _save("hub", hub, "", body, user)
+
+
+@router.put("/hub/{hub}/enabled")
+def set_hub_quota_enabled(hub: str, body: EnabledIn, user: dict = CurrentUser) -> Wire:
+    """Turn the hub's limit on or off in one motion, keeping the ceiling.
+    Answers with the quota as it stands after the switch and the enforcement
+    pass that follows it."""
+    return _switch("hub", hub, "", body.enabled, user)
 
 
 @router.delete("/hub/{hub}")
@@ -138,6 +170,11 @@ def get_user_quota(hub: str, name: str, user: dict = CurrentUser) -> Wire:
 @router.put("/user/{hub}/{name}")
 def set_user_quota(hub: str, name: str, body: QuotaIn, user: dict = CurrentUser) -> Wire:
     return _save("user", hub, name, body, user)
+
+
+@router.put("/user/{hub}/{name}/enabled")
+def set_user_quota_enabled(hub: str, name: str, body: EnabledIn, user: dict = CurrentUser) -> Wire:
+    return _switch("user", hub, name, body.enabled, user)
 
 
 @router.delete("/user/{hub}/{name}")

@@ -65,6 +65,23 @@ DEFAULTS: dict[str, Any] = {
     "vpn_account_name_template": None,
     "vpn_filename_template": None,
     "vpn_embed_password_default": None,
+    # --- the panel's own domain and certificate --------------------------
+    # A public hostname the panel is reached at. Setting one makes the panel
+    # obtain a Let's Encrypt certificate for it, serve HTTPS on ``https_port``
+    # and keep the certificate renewed (see :mod:`app.services.tls`). Empty
+    # means "no domain": plain HTTP on the bind port, as before.
+    "domain": None,
+    "https_port": None,
+    # The contact Let's Encrypt writes to about an expiring certificate;
+    # optional, and never shared with anyone else.
+    "acme_email": None,
+    # Let's Encrypt's staging environment issues certificates browsers do not
+    # trust, but has no meaningful rate limits -- the place to rehearse.
+    "acme_staging": None,
+    # Refuse every request whose Host header is not the domain, so the panel
+    # cannot be reached by IP address. Requests from the machine itself and
+    # the certificate validation path are always let through.
+    "domain_only": None,
 }
 
 
@@ -95,6 +112,11 @@ def _seed(key: str) -> Any:
         "vpn_account_name_template": _vpnfile().DEFAULT_ACCOUNT_NAME_TEMPLATE,
         "vpn_filename_template": _vpnfile().DEFAULT_FILENAME_TEMPLATE,
         "vpn_embed_password_default": True,
+        "domain": "",
+        "https_port": 443,
+        "acme_email": "",
+        "acme_staging": False,
+        "domain_only": False,
     }[key]
 
 

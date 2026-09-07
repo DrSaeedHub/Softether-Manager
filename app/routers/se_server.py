@@ -11,7 +11,7 @@ from __future__ import annotations
 import base64
 from typing import Any, Optional
 
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, Body, HTTPException
 from pydantic import BaseModel
 
 from ..audit import record
@@ -99,9 +99,16 @@ def create_listener(body: ListenerIn, user: dict = CurrentUser) -> Wire:
 
 @router.put("/listeners/{port}")
 def enable_listener(port: int, body: ListenerIn, user: dict = CurrentUser) -> Wire:
-    out = rpc("EnableListener", {"Port_u32": port, "Enable_bool": body.enable})
+    """Enable or disable one listener, answering with the listener as the
+    server reports it afterwards -- ``Enables_bool`` is what was asked for,
+    ``Errors_bool`` whether the port could actually be opened."""
+    rpc("EnableListener", {"Port_u32": port, "Enable_bool": body.enable})
     record(user, "listener.toggled", "server", "", f"port {port} -> {body.enable}")
-    return out
+    listeners = rpc("EnumListener").get("ListenerList", [])
+    for entry in listeners:
+        if int(entry.get("Ports_u32", -1)) == port:
+            return {**entry, "enabled": bool(entry.get("Enables_bool")), "ListenerList": listeners}
+    raise HTTPException(status_code=404, detail=f"No listener on port {port}.")
 
 
 @router.delete("/listeners/{port}")
@@ -118,9 +125,9 @@ def get_special_listener(user: dict = CurrentUser) -> Wire:
 
 @router.put("/special-listener")
 def set_special_listener(body: Wire = Body(...), user: dict = CurrentUser) -> Wire:
-    out = rpc("SetSpecialListener", body)
+    rpc("SetSpecialListener", body)
     record(user, "special_listener.updated", "server", "")
-    return out
+    return rpc("GetSpecialListener")
 
 
 # --- protocols: IPsec / OpenVPN+SSTP / Azure / DDNS ---------------------------
@@ -168,9 +175,9 @@ def get_azure(user: dict = CurrentUser) -> Wire:
 
 @router.put("/azure")
 def set_azure(body: Wire = Body(...), user: dict = CurrentUser) -> Wire:
-    out = rpc("SetAzureStatus", body)
-    record(user, "azure.toggled", "server", "")
-    return out
+    rpc("SetAzureStatus", body)
+    record(user, "azure.toggled", "server", "", f"enabled={bool(body.get('IsEnabled_bool'))}")
+    return rpc("GetAzureStatus")
 
 
 @router.get("/ddns")
@@ -355,18 +362,25 @@ def del_l3(name: str, user: dict = CurrentUser) -> Wire:
     return out
 
 
+def _l3_state(name: str) -> Wire:
+    for entry in rpc("EnumL3Switch").get("L3SWList", []):
+        if str(entry.get("Name_str", "")) == name:
+            return {**entry, "active": bool(entry.get("Active_bool"))}
+    raise HTTPException(status_code=404, detail=f"No layer-3 switch named {name}.")
+
+
 @router.post("/l3/{name}/start")
 def start_l3(name: str, user: dict = CurrentUser) -> Wire:
-    out = rpc("StartL3Switch", {"Name_str": name})
+    rpc("StartL3Switch", {"Name_str": name})
     record(user, "l3.started", "server", "", name)
-    return out
+    return _l3_state(name)
 
 
 @router.post("/l3/{name}/stop")
 def stop_l3(name: str, user: dict = CurrentUser) -> Wire:
-    out = rpc("StopL3Switch", {"Name_str": name})
+    rpc("StopL3Switch", {"Name_str": name})
     record(user, "l3.stopped", "server", "", name)
-    return out
+    return _l3_state(name)
 
 
 @router.get("/l3/{name}/interfaces")

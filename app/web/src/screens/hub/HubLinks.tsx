@@ -8,6 +8,7 @@ import { formatBytes, formatDate, timeAgo } from "../../lib/util";
 import { IconCascade, IconPlus, IconTrash } from "../../ui/Icon";
 import { Sheet } from "../../ui/Sheet";
 import { Pill } from "../../ui/Status";
+import { OutcomeNote, Switch, useToggle } from "../../ui/Switch";
 
 /**
  * Cascade connections: this hub dialing out to a hub on another server and
@@ -24,14 +25,9 @@ export function HubLinks({ hub }: { hub: string }) {
   const load = useCallback(async () => {
     const r = await api.links(hub).catch(() => null);
     if (r) setLinks((r.LinkList as Wire[]) ?? []);
+    return r ? ((r.LinkList as Wire[]) ?? []) : null;
   }, [hub]);
   usePoll(load, "detail", [hub]);
-
-  const toggle = (link: Wire) =>
-    guard(async () => {
-      await api.linkOnline(hub, String(link.AccountName_utf), !link.Online_bool);
-      await load();
-    }, link.Online_bool ? "Link taken offline." : "Link brought online.");
 
   return (
     <>
@@ -87,9 +83,7 @@ export function HubLinks({ hub }: { hub: string }) {
                   </div>
                 </div>
                 <div className="row__side" onClick={(e) => e.stopPropagation()}>
-                  <button className="btn btn--sm" onClick={() => void toggle(l)}>
-                    {l.Online_bool ? "Offline" : "Online"}
-                  </button>
+                  <LinkSwitch hub={hub} link={l} reload={load} />
                   <button className="btn btn--sm btn--ghost" onClick={() => setDeleting(name)} aria-label="Delete">
                     <IconTrash size={14} />
                   </button>
@@ -125,6 +119,40 @@ export function HubLinks({ hub }: { hub: string }) {
         />
       )}
     </>
+  );
+}
+
+/** Online / offline for one cascade, verified against the list read back. */
+function LinkSwitch({ hub, link, reload }: { hub: string; link: Wire; reload: () => Promise<Wire[] | null> }) {
+  const name = String(link.AccountName_utf);
+  const toggle = useToggle({
+    value: Boolean(link.Online_bool),
+    apply: async (next) => {
+      const r = await api.linkOnline(hub, name, next);
+      return Boolean(r.online);
+    },
+    reload: async () => {
+      const list = await reload();
+      const me = list?.find((x) => String(x.AccountName_utf) === name);
+      return me ? Boolean(me.Online_bool) : null;
+    },
+    noun: `Cascade ${name}`,
+    onWord: "online",
+    offWord: "offline",
+  });
+  return (
+    <span className="switchbox">
+      <Switch
+        on={Boolean(link.Online_bool)}
+        pending={toggle.pending}
+        target={toggle.target}
+        onToggle={() => void toggle.toggle()}
+        label={`Cascade ${name}`}
+        onWord="online"
+        offWord="offline"
+      />
+      <OutcomeNote outcome={toggle.outcome} />
+    </span>
   );
 }
 

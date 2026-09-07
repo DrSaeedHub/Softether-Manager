@@ -67,9 +67,12 @@ class OnlineIn(BaseModel):
 
 @router.put("/{hub}/online")
 def set_hub_online(hub: str, body: OnlineIn, user: dict = CurrentUser) -> Wire:
-    out = rpc("SetHubOnline", {"HubName_str": hub, "Online_bool": body.online})
+    """Flip the hub's switch, then read it back: the answer is the state the
+    server is actually in, not the state that was asked for."""
+    rpc("SetHubOnline", {"HubName_str": hub, "Online_bool": body.online})
     record(user, "hub.online_toggled", "hub", hub, f"online={body.online}")
-    return out
+    status = rpc("GetHubStatus", {"HubName_str": hub})
+    return {**status, "online": bool(status.get("Online_bool"))}
 
 
 @router.get("/{hub}/status")
@@ -712,26 +715,36 @@ def del_crl(hub: str, key: int, user: dict = CurrentUser) -> Wire:
 # --- SecureNAT -------------------------------------------------------------------------
 
 
+def _securenat_state(hub: str) -> Wire:
+    """Everything the SecureNAT tab shows, with one honest answer to "is it
+    on": ``GetSecureNATStatus`` answers whether or not the virtual router is
+    running, so the switch's position comes from the hub status flag."""
+    status = rpc("GetHubStatus", {"HubName_str": hub})
+    return {
+        "enabled": bool(status.get("SecureNATEnabled_bool")),
+        "hub_online": bool(status.get("Online_bool")),
+        "status": rpc("GetSecureNATStatus", {"HubName_str": hub}),
+        "options": rpc("GetSecureNATOption", {"RpcHubName_str": hub}),
+    }
+
+
 @router.get("/{hub}/securenat")
 def securenat_overview(hub: str, user: dict = CurrentUser) -> Wire:
-    out: Wire = {}
-    out["status"] = rpc("GetSecureNATStatus", {"HubName_str": hub})
-    out["options"] = rpc("GetSecureNATOption", {"RpcHubName_str": hub})
-    return out
+    return _securenat_state(hub)
 
 
 @router.post("/{hub}/securenat/enable")
 def enable_securenat(hub: str, user: dict = CurrentUser) -> Wire:
-    out = rpc("EnableSecureNAT", {"HubName_str": hub})
+    rpc("EnableSecureNAT", {"HubName_str": hub})
     record(user, "securenat.enabled", "hub", hub)
-    return out
+    return _securenat_state(hub)
 
 
 @router.post("/{hub}/securenat/disable")
 def disable_securenat(hub: str, user: dict = CurrentUser) -> Wire:
-    out = rpc("DisableSecureNAT", {"HubName_str": hub})
+    rpc("DisableSecureNAT", {"HubName_str": hub})
     record(user, "securenat.disabled", "hub", hub)
-    return out
+    return _securenat_state(hub)
 
 
 @router.put("/{hub}/securenat/options")
@@ -802,9 +815,14 @@ class LinkOnlineIn(BaseModel):
 @router.put("/{hub}/links/{name}/online")
 def set_link_online(hub: str, name: str, body: LinkOnlineIn, user: dict = CurrentUser) -> Wire:
     method = "SetLinkOnline" if body.online else "SetLinkOffline"
-    out = rpc(method, {"HubName_str": hub, "AccountName_utf": name})
+    rpc(method, {"HubName_str": hub, "AccountName_utf": name})
     record(user, "link.online_toggled", "hub", hub, f"{name} -> {body.online}")
-    return out
+    # Read the link back as it now stands, so the caller shows the state the
+    # server is in rather than the one it asked for.
+    for link in rpc("EnumLink", {"HubName_str": hub}).get("LinkList", []):
+        if str(link.get("AccountName_utf", "")) == name:
+            return {**link, "online": bool(link.get("Online_bool"))}
+    raise HTTPException(status_code=404, detail=f"Cascade {name} is no longer on hub {hub}.")
 
 
 class LinkRenameIn(BaseModel):

@@ -354,8 +354,10 @@ export function KV({ rows }: { rows: [ReactNode, ReactNode][] }) {
  *
  *  The interval is usually a tier -- "live", "detail", "list" -- which the
  *  operator sets in Settings; a number is for the few screens whose refresh
- *  rate is a property of the screen, not a preference. */
-export function usePoll(load: () => Promise<void> | void, rate: PollRate, deps: unknown[] = []) {
+ *  rate is a property of the screen, not a preference. Whatever the loader
+ *  returns is ignored here, so the same function can double as the read-back
+ *  a switch verifies itself against. */
+export function usePoll(load: () => Promise<unknown> | unknown, rate: PollRate, deps: unknown[] = []) {
   const saved = useRef(load);
   saved.current = load;
   const ms = useRate(rate);

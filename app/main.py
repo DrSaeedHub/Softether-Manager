@@ -9,6 +9,11 @@ The web path is a secret prefix read from the database (seeded from the
 environment file on first start); empty serves everything at the root. It is
 applied by mounting the real application inside an outer shell, so the
 application itself never has to know its own prefix.
+
+Around the outside sits the host guard (:mod:`app.hostguard`), which is what
+"only serve the panel at its domain" is made of, and beside the main listener
+the TLS manager (:mod:`app.services.tls`) runs the HTTPS and port-80
+listeners for the same application once a domain is configured.
 """
 from __future__ import annotations
 
@@ -21,10 +26,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import hostguard
 from .config import APP_ROOT, settings
 from .db import get_db
 from .routers import auth, connection, quota, se_hub, se_rpc, se_server, system, users
 from .services import sampler
+from .services import tls
 from .services.resources import sampler as resource_sampler
 from .version import get_version
 
@@ -34,11 +41,16 @@ WEB_DIST = APP_ROOT / "app" / "web" / "out"
 
 
 @asynccontextmanager
-async def _lifespan(app: FastAPI):
+async def _lifespan(_inner: FastAPI):
     get_db()  # creates the schema (and migrations) on first start
     sampler.start()
     resource_sampler.start()
+    # The extra listeners serve the same wrapped application the main one
+    # does -- the module-level ``app`` below, host guard included -- so a
+    # request is treated identically whichever port it arrived on.
+    tls.manager.start(app)
     yield
+    tls.manager.stop()
     sampler.stop()
     resource_sampler.stop()
 
@@ -114,7 +126,7 @@ def _read_web_path() -> str:
         return settings.normalised_web_path
 
 
-def create_app() -> FastAPI:
+def _build_root() -> FastAPI:
     core = _build_core()
     web_path = _read_web_path()
     if not web_path:
@@ -133,6 +145,14 @@ def create_app() -> FastAPI:
 
     shell.mount(f"/{web_path}", core)
     return shell
+
+
+def create_app() -> hostguard.HostGuard:
+    """The whole thing: the routed application inside the host guard. The
+    guard starts out with whatever policy the database holds and is
+    reconfigured by the TLS manager whenever the settings change."""
+    hostguard.load_from_settings()
+    return hostguard.HostGuard(_build_root())
 
 
 app = create_app()

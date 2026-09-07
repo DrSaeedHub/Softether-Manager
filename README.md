@@ -33,6 +33,7 @@ live:
 | **Cascades** | hub-to-hub links to other servers, with live link status |
 | **Switching** | MAC and IP address tables, local bridges, virtual layer-3 switches with interfaces and routes |
 | **Server** | listeners, VPN-over-ICMP/DNS, L2TP/IPsec, OpenVPN and SSTP clones, VPN Azure, dynamic DNS, cipher, certificate (view / replace / regenerate), clustering, keep-alive, syslog, EtherIP IDs, a paged browser for the server and security logs, config backup and restore |
+| **The panel itself** | a custom domain with a Let's Encrypt certificate the panel obtains and renews on its own, HTTPS on a port of your choosing, and a switch that makes the domain the only way in — a request by IP address gets a bare 404 |
 
 And for anything you want to do *exactly* the way the SoftEther reference describes it,
 there is an **API console**: every documented method, its parameter template pre-filled,
@@ -62,6 +63,12 @@ zero and every figure it prints subtracts it. **Reset transfer** moves that zero
 today, which puts the Transfer column and the limit back to nothing together — they
 were never two numbers. A limit is edited where it belongs, on the config's profile,
 and the user tables carry the meter so a full one is visible without opening anything.
+
+**Says what state everything is in.** Every switch in the panel — a hub's online state, a
+listener, SecureNAT, VPN Azure, a cascade, a layer-3 switch, a traffic limit — is a real
+switch: it locks while the request is in flight, then shows the state *read back from the
+server*, not the state that was clicked. A change that did not take says so, with the
+reason, next to the control and in a toast.
 
 More rooms of the house — every user across every hub, who is connected right now, one
 Virtual Hub's home, and the whole thing in its light theme:
@@ -140,6 +147,7 @@ sem update               install the newest release
 sem password             reset an account password when nobody can sign in
 sem users                list the panel accounts
 sem port / sem path      move the panel
+sem domain               the domain, its certificate, and domain-only access
 sem logs -f              follow the service log
 sem uninstall            remove the panel (the database survives unless you say otherwise)
 ```
@@ -151,6 +159,28 @@ one click installs the new version through the same installer an operator would 
 launched in a transient systemd unit so it survives the restart it performs. A release
 that lands while the panel is open announces itself once, with the updater on the
 notice. `sem update` does the identical thing from a shell.
+
+### A domain and HTTPS
+
+Point a DNS record at the server, open port 80 and the HTTPS port, and enter the name
+under **Settings → Domain & HTTPS**. The panel registers with Let's Encrypt, answers the
+validation on port 80, obtains the certificate, starts serving HTTPS on the port you chose
+(443 unless SoftEther's own listener is sitting on it — then disable that listener, or
+pick another port), keeps port 80 answering with a redirect, and renews the certificate
+a month before it expires. Each stage — the domain, its DNS, port 80, the certificate,
+the renewal, the HTTPS listener — reports its own state and its own error on the page,
+so a record that points elsewhere, a firewall that blocks port 80 and a port SoftEther
+already holds read as three different problems, not one "failed". The account key, the
+certificate and its private key live in the data directory with everything else the
+panel owns.
+
+Once you are using the panel through the domain, **Only serve the panel at this domain**
+turns away every request that arrives by IP address or under any other name, on every
+port, with the same anonymous 404 the panel's root already gives. The switch is only
+offered from the domain itself, so it cannot lock you out; requests from the machine
+itself and the certificate validation path are always let through, so renewal and the
+installer keep working. If a DNS change ever does strand you, `sem domain only off` on
+the server lifts it.
 
 ## Scope: one server, on purpose
 
@@ -188,8 +218,15 @@ One monolithic package, one process, one SQLite file:
 
 Secrets stay where they belong: the SoftEther administrator password is
 Fernet-encrypted in the database; the session-signing and encryption keys are generated
-on first start into the data directory; the environment file under `/etc` holds
-deployment facts only. Every state-changing action lands in an audit log.
+on first start into the data directory, and so are the Let's Encrypt account key and the
+panel's certificate; the environment file under `/etc` holds deployment facts only.
+Every state-changing action lands in an audit log.
+
+The certificate comes from a small ACME client of the panel's own (`app/services/acme.py`,
+HTTP-01 only, on the `cryptography` package the panel already depends on) rather than
+from certbot, so there is nothing to install, no cron job, and the service's
+`ProtectSystem=full` sandbox stays as tight as it was: everything the certificate needs
+is in the data directory.
 
 ## Development
 
@@ -212,8 +249,13 @@ the repository's latest release.
 
 ## Security notes
 
-- The panel serves plain HTTP. Put a TLS-terminating reverse proxy in front of it, or
-  bind it to localhost and reach it over an SSH tunnel or WireGuard.
+- Out of the box the panel serves plain HTTP. Give it a domain (Settings → Domain &
+  HTTPS) and it serves HTTPS with a Let's Encrypt certificate it renews itself; or put a
+  TLS-terminating reverse proxy in front of it, or bind it to localhost and reach it over
+  an SSH tunnel or WireGuard. A session issued over HTTPS carries a `Secure` cookie and is
+  never sent back over the plain port.
+- With a domain set, *Only serve the panel at this domain* refuses everything that does
+  not name it — the bare IP address included — with an anonymous 404.
 - The secret web path keeps scanners out of the login form; it is defence in depth, not
   authentication. The authentication is the account password (scrypt-hashed) and
   HttpOnly session cookies.

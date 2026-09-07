@@ -148,6 +148,82 @@ export interface QuotaIn {
   enabled: boolean;
 }
 
+/** The panel's own domain and certificate, every stage reported on its own. */
+export interface DomainStatus {
+  configured: boolean;
+  domain: string;
+  https_port: number;
+  acme_email: string;
+  acme_staging: boolean;
+  domain_only: boolean;
+  config_error: string;
+  /** idle · waiting (no certificate yet) · issuing · renewing · ok · failed */
+  phase: string;
+  busy: boolean;
+  /** What the issuance is doing right now, while busy. */
+  step: string;
+  dns: {
+    checked_at?: string;
+    domain?: string;
+    addresses?: string[];
+    local_addresses?: string[];
+    /** True when the name points at one of this machine's addresses; null when it could not be resolved. */
+    match?: boolean | null;
+    error?: string;
+  };
+  http: { port: number; listening: boolean; error: string; redirecting: boolean };
+  https: { port: number; listening: boolean; error: string; since: string };
+  certificate: {
+    present: boolean;
+    domain: string;
+    issued_at: string;
+    not_before: string;
+    expires_at: string;
+    days_left: number | null;
+    renew_at: string;
+    issuer: string;
+    serial: string;
+    staging: boolean;
+    expired: boolean;
+    /** The certificate on disk does not fit the settings: another name, the
+     *  other environment, or expired -- a new one is due. */
+    stale: boolean;
+    matches_domain: boolean;
+  };
+  renewal: {
+    automatic: boolean;
+    renew_before_days: number;
+    renew_at: string;
+    due: boolean;
+    last_attempt_at: string;
+    last_attempt_kind: string;
+    last_success_at: string;
+    last_error: string;
+    last_error_type: string;
+    last_error_at: string;
+    next_attempt_at: string;
+    consecutive_failures: number;
+  };
+  url: string;
+  origin: string;
+  events: { at: string; kind: string; message: string }[];
+  /** The Host this very request came in on, and whether that is the domain. */
+  request_host: string;
+  via_domain: boolean;
+  via_loopback: boolean;
+  bind_port: number;
+  web_path: string;
+  changed?: string[];
+}
+
+export interface DomainIn {
+  domain?: string;
+  https_port?: number;
+  acme_email?: string;
+  acme_staging?: boolean;
+  domain_only?: boolean;
+}
+
 const hubPath = (hub: string) => `/hubs/${encodeURIComponent(hub)}`;
 
 export const api = {
@@ -174,6 +250,11 @@ export const api = {
   updateApply: (version = "") => request("POST", "/system/update/apply", { version }),
   updateState: () => request("GET", "/system/update/state"),
   restartPanel: () => request("POST", "/system/restart"),
+  domain: () => request<DomainStatus>("GET", "/system/domain"),
+  saveDomain: (body: DomainIn) => request<DomainStatus>("PUT", "/system/domain", body),
+  removeDomain: () => request<DomainStatus>("DELETE", "/system/domain"),
+  issueCertificate: () => request<DomainStatus>("POST", "/system/domain/issue"),
+  checkDomain: () => request<DomainStatus>("POST", "/system/domain/check"),
   audit: (beforeId = 0) =>
     request<Wire[]>("GET", `/system/audit?limit=100${beforeId ? `&before_id=${beforeId}` : ""}`),
 
@@ -404,6 +485,8 @@ export const api = {
   hubQuota: (hub: string) => request<Quota>("GET", `/quotas/hub/${encodeURIComponent(hub)}`),
   setHubQuota: (hub: string, body: QuotaIn) =>
     request<Quota>("PUT", `/quotas/hub/${encodeURIComponent(hub)}`, body),
+  setHubQuotaEnabled: (hub: string, enabled: boolean) =>
+    request<Quota>("PUT", `/quotas/hub/${encodeURIComponent(hub)}/enabled`, { enabled }),
   deleteHubQuota: (hub: string) => request("DELETE", `/quotas/hub/${encodeURIComponent(hub)}`),
   resetHubTransfer: (hub: string) =>
     request<Quota>("POST", `/quotas/hub/${encodeURIComponent(hub)}/reset`),
@@ -411,6 +494,8 @@ export const api = {
     request<Quota>("GET", `/quotas/user/${encodeURIComponent(hub)}/${encodeURIComponent(name)}`),
   setUserQuota: (hub: string, name: string, body: QuotaIn) =>
     request<Quota>("PUT", `/quotas/user/${encodeURIComponent(hub)}/${encodeURIComponent(name)}`, body),
+  setUserQuotaEnabled: (hub: string, name: string, enabled: boolean) =>
+    request<Quota>("PUT", `/quotas/user/${encodeURIComponent(hub)}/${encodeURIComponent(name)}/enabled`, { enabled }),
   deleteUserQuota: (hub: string, name: string) =>
     request("DELETE", `/quotas/user/${encodeURIComponent(hub)}/${encodeURIComponent(name)}`),
   resetUserTransfer: (hub: string, name: string) =>

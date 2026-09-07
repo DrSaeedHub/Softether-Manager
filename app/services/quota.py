@@ -254,6 +254,33 @@ def save(
     return get(subject, hub, username)  # type: ignore[return-value]
 
 
+def set_enabled(subject: str, hub: str, username: str, enabled: bool) -> dict[str, Any]:
+    """Arm or disarm a ceiling without touching the ceiling itself.
+
+    The one-switch operation the hub page offers: the limit, the metric and
+    the consumption all stay exactly as they are, only whether the panel acts
+    on them changes. Disarming a limit that has already bitten lifts its
+    block on the next enforcement pass (the router runs one at once), because
+    a subject cut off by a rule nobody enforces any more has nothing holding
+    it down.
+
+    Refused when the subject has no ceiling: a record that only remembers a
+    reset baseline has nothing to arm.
+    """
+    row = _row(subject, hub, username)
+    if row is None or int(row["LimitBytes"]) <= 0:
+        raise QuotaError(
+            f"No traffic limit is set on this {'hub' if subject == 'hub' else 'config'}; "
+            "set one before turning enforcement on or off."
+        )
+    get_db().execute(
+        'UPDATE "TrafficQuota" SET "IsEnabled" = :enabled, "UpdatedDate" = :now '
+        'WHERE "TrafficQuotaID" = :id',
+        {"id": row["TrafficQuotaID"], "enabled": 1 if enabled else 0, "now": utc_now()},
+    )
+    return get(subject, hub, username)  # type: ignore[return-value]
+
+
 def reset_transfer(subject: str, hub: str, username: str = "") -> dict[str, Any]:
     """Zero the subject's transfer: the baseline moves up to the counter.
 
